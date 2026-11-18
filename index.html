@@ -15,8 +15,8 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-<!-- ZXing com versão fixa (fallback quando não há BarcodeDetector nativo) -->
-<script defer src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<!-- ZXing com versão fixa, servido do próprio diretório (não depende de CDN externa) -->
+<script defer src="./vendor/zxing.min.js"></script>
 <style>
   :root{
     --azul:#0b3d91;
@@ -136,35 +136,46 @@
   #barra-scan .btn{ background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.35); color:#fff; }
   #btn-torch.on{ background:var(--amarelo); color:#111; border-color:transparent; }
 
-  /* ===== Overlay de resultado ===== */
-  #overlay{
-    position:fixed; inset:0; z-index:80;
-    background:rgba(0,0,0,.55);
-    display:flex; align-items:center; justify-content:center; padding:16px;
+  /* ===== Tela de consulta (portal embutido) ===== */
+  #view-consulta[hidden]{ display:none; }
+  .consulta-topo{
+    position:sticky; top:0; z-index:10;
+    background:var(--azul); color:#fff;
+    padding:max(10px, env(safe-area-inset-top)) 16px 12px;
   }
-  #overlay[hidden]{ display:none; }
-  .overlay-card{
-    background:var(--cartao); color:var(--texto);
-    border-radius:16px; padding:20px;
-    width:100%; max-width:480px; max-height:86vh; overflow-y:auto;
-  }
-  .overlay-card h2{ margin:0 0 6px; }
-  #chave-formatada{
+  .consulta-topo h1{ margin:0; font-size:1.15rem; }
+  .consulta-topo .linha-botoes{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .consulta-topo .btn{ min-height:44px; font-size:.9rem; flex:1 1 auto; padding:8px 10px; }
+  #consulta-chave{
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    font-size:1.05rem; font-weight:700; letter-spacing:.5px; word-break:break-all;
-    background:var(--ok-bg); color:var(--ok-texto);
-    border-radius:10px; padding:12px; margin:10px 0;
+    font-size:.95rem; font-weight:700; letter-spacing:.4px; word-break:break-all; text-align:center;
+    padding:10px 14px; margin:14px 16px 6px;
+    background:var(--ok-bg); color:var(--ok-texto); border-radius:12px;
   }
-  #resumo{ margin:0 0 12px; }
+  #consulta-resumo{ margin:0 16px 4px; }
+  #consulta-resumo .linha-resumo{ grid-template-columns:130px 1fr; font-size:.92rem; }
+  .iframe-wrap{ margin:10px 0 calc(12px + env(safe-area-inset-bottom)); padding:0 16px; }
+  .iframe-portal{
+    width:100%; height:min(72vh, 760px);
+    border:1px solid var(--borda); border-radius:12px;
+    background:#fff; display:block;
+  }
+  .iframe-portal[hidden]{ display:none; }
+  #embed-box{ margin-bottom:10px; }
+  .iframe-legenda{ font-size:.85rem; color:var(--suave); text-align:center; margin:8px 0 0; }
+  .consulta-aviso{
+    margin:10px 16px 0; padding:12px 14px; border-radius:12px;
+    background:var(--erro-bg); color:var(--erro-texto); font-size:.92rem; line-height:1.45;
+  }
+  .consulta-aviso .btn{ margin-top:10px; width:100%; }
+
+  /* ===== Resumo da chave (usado na tela de consulta) ===== */
   .linha-resumo{
     display:grid; grid-template-columns:150px 1fr; gap:8px;
     padding:8px 0; border-bottom:1px solid var(--borda); font-size:.98rem;
   }
   .linha-resumo dt{ color:var(--suave); margin:0; }
   .linha-resumo dd{ margin:0; font-weight:600; word-break:break-all; }
-  #aviso-redir{ font-size:.92rem; color:var(--suave); margin:0 0 14px; }
-  .acoes-overlay{ display:flex; gap:10px; }
-  .acoes-overlay .btn{ flex:1; }
 
   /* ===== Histórico ===== */
   #historico{ list-style:none; margin:0; padding:0; }
@@ -214,6 +225,29 @@
 </header>
 
 <main>
+  <!-- ============ TELA DE CONSULTA (PORTAL EMBUTIDO) ============ -->
+  <section id="view-consulta" hidden aria-label="Consulta no Portal Nacional da NF-e">
+    <div class="consulta-topo">
+      <h1>🧾 Consulta da NF-e</h1>
+      <div class="linha-botoes">
+        <button id="btn-consulta-voltar" class="btn" type="button">← Voltar</button>
+        <button id="btn-consulta-nova" class="btn" type="button">📷 Nova leitura</button>
+        <button id="btn-consulta-copiar" class="btn" type="button">Copiar chave</button>
+      </div>
+      <button id="btn-consulta-abrir" class="btn btn-primario" type="button" style="width:100%; margin-top:10px;">🧾 Abrir a consulta oficial</button>
+      <p style="margin:8px 0 0; font-size:.8rem; opacity:.85;">Preencha o captcha e toque em “Continuar” lá. Ao terminar, volte com o gesto/botão — a chave continua guardada aqui.</p>
+    </div>
+    <p id="consulta-chave" class="consulta-chave"></p>
+    <dl id="consulta-resumo" class="consulta-resumo"></dl>
+    <div class="iframe-wrap">
+      <div id="embed-box">
+        <button id="btn-consulta-embed" class="btn" type="button" style="width:100%;">📎 Carregar a consulta aqui dentro (experimental)</button>
+        <p class="iframe-legenda">O site da SEFAZ costuma bloquear a exibição embutida em celulares (restrição de cookies); se aparecer em branco, use <b>Abrir a consulta oficial</b>.</p>
+      </div>
+      <iframe id="portal-frame" class="iframe-portal" title="Portal Nacional da NF-e" referrerpolicy="no-referrer" hidden></iframe>
+    </div>
+  </section>
+
   <!-- ============ TELA INICIAL ============ -->
   <section id="view-home" aria-label="Início">
     <button id="btn-ler" class="btn btn-primario" type="button">📷 Ler código de barras</button>
@@ -254,21 +288,6 @@
       <button id="btn-fechar" class="btn" type="button">✕ Fechar</button>
     </div>
   </section>
-</main>
-
-<!-- ============ OVERLAY: CHAVE VÁLIDA ============ -->
-<div id="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="overlay-titulo">
-  <div class="overlay-card">
-    <h2 id="overlay-titulo">✅ Chave válida</h2>
-    <p id="chave-formatada"></p>
-    <dl id="resumo"></dl>
-    <p id="aviso-redir">Abrindo a consulta no Portal Nacional da NF-e em instantes. Lá, resolva o captcha e clique em “Continuar”.</p>
-    <div class="acoes-overlay">
-      <button id="btn-cancelar" class="btn" type="button">Cancelar</button>
-      <button id="btn-abrir-agora" class="btn btn-primario" type="button">Abrir agora</button>
-    </div>
-  </div>
-</div>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -284,7 +303,7 @@ var URL_PORTAL = 'https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?t
 var TAMANHO_CHAVE = 44;
 var HIST_MAX = 20;
 var HIST_CHAVE = 'leitor-nfe:historico';
-var DELAY_REDIRECIONA_MS = 1500;
+var ULTIMA_CHAVE = 'leitor-nfe:ultima'; // última chave consultada (sobrevive a fechar o app)
 
 var UF = {11:'RO',12:'AC',13:'AM',14:'RR',15:'PA',16:'AP',17:'TO',
           21:'MA',22:'PI',23:'CE',24:'RN',25:'PB',26:'PE',27:'AL',28:'SE',
@@ -369,12 +388,13 @@ function resumoChave(chave){
 function $(id){ return document.getElementById(id); }
 var viewHome   = $('view-home');
 var viewScan   = $('view-scan');
+var viewConsulta = $('view-consulta');
+var portalFrame  = $('portal-frame');
 var video      = $('video');
 var canvas     = $('canvas');
 var ctx        = canvas.getContext('2d', { willReadFrequently: true });
 var selCamera  = $('sel-camera');
 var btnTorch   = $('btn-torch');
-var overlay    = $('overlay');
 var toastEl    = $('toast');
 
 /* ================= Estado ================= */
@@ -383,7 +403,6 @@ var loopAtivo     = false;
 var ultimoFrame   = 0;
 var ultimoInvalida = 0;
 var ultimaChave   = null;
-var timerRedir    = null;
 var ultimoDispositivo = null;
 var detBarra = null;      // BarcodeDetector nativo (se existir)
 var leitorZX = null;      // MultiFormatReader ZXing (cache)
@@ -425,6 +444,16 @@ function gravarHistorico(arr){
   try { window.localStorage.setItem(HIST_CHAVE, JSON.stringify(arr.slice(0, HIST_MAX))); }
   catch (e) { /* modo privado ou sem espaço: ignora */ }
 }
+/** Guarda a última chave consultada para restaurar a tela ao reabrir o app. */
+function salvarUltima(chave){
+  try { window.localStorage.setItem(ULTIMA_CHAVE, chave); } catch (e) {}
+}
+function lerUltima(){
+  try {
+    var v = window.localStorage.getItem(ULTIMA_CHAVE);
+    return (v && dvValido(v)) ? v : null;
+  } catch (e) { return null; }
+}
 function addHistorico(chave){
   var arr = lerHistorico();
   arr.unshift({ chave: chave, data: new Date().toISOString() });
@@ -458,7 +487,7 @@ function renderizarHistorico(){
     var bReabrir = document.createElement('button');
     bReabrir.type = 'button'; bReabrir.className = 'btn';
     bReabrir.textContent = 'Reabrir consulta';
-    bReabrir.addEventListener('click', function(){ irParaPortal(item.chave); });
+    bReabrir.addEventListener('click', function(){ abrirConsulta(item.chave); });
 
     var bCopiar = document.createElement('button');
     bCopiar.type = 'button'; bCopiar.className = 'btn';
@@ -512,6 +541,7 @@ function fecharCamera(){
 function voltarHome(){
   fecharCamera();
   viewScan.hidden = true;
+  viewConsulta.hidden = true;
   viewHome.hidden = false;
   document.documentElement.style.overflow = '';
 }
@@ -673,12 +703,15 @@ function tratarLeitura(bruto){
   mostrarResultado(chave);
 }
 
-/* ================= Resultado + redirecionamento ================= */
-function mostrarResultado(chave){
+/* ================= Resultado + consulta embutida ================= */
+/** Preenche e mostra a tela de consulta com o portal da SEFAZ dentro de um iframe. */
+function abrirConsulta(chave){
+  if (!chave) return;
   ultimaChave = chave;
-  vibrar([80]);
-  $('chave-formatada').textContent = formatarChave(chave);
-  var dl = $('resumo');
+  fecharCamera(); // desliga a câmera antes de mostrar a consulta
+
+  $('consulta-chave').textContent = formatarChave(chave);
+  var dl = $('consulta-resumo');
   while (dl.firstChild) dl.removeChild(dl.firstChild);
   resumoChave(chave).forEach(function(par){
     var linha = document.createElement('div');
@@ -688,28 +721,44 @@ function mostrarResultado(chave){
     linha.appendChild(dt); linha.appendChild(dd);
     dl.appendChild(linha);
   });
+
+  // reseta o embed experimental (só carrega quando o usuário pede)
+  portalFrame.hidden = true;
+  portalFrame.removeAttribute('src');
+  $('embed-box').style.display = '';
+
+  viewHome.hidden = true;
+  viewScan.hidden = true;
+  viewConsulta.hidden = false;
+  document.documentElement.style.overflow = '';
+  window.scrollTo(0, 0);
+  window.dispatchEvent(new Event('lnfe:consulta')); // gancho p/ testes/E2E
+}
+
+/* Ponto de entrada comum: lê, valida e abre a consulta embutida. */
+function mostrarResultado(chave){
+  ultimaChave = chave;
+  vibrar([80]);
   addHistorico(chave);
-  overlay.hidden = false;
-  clearTimeout(timerRedir);
-  timerRedir = setTimeout(irParaPortal, DELAY_REDIRECIONA_MS);
+  salvarUltima(chave);
+  toast('✅ Chave válida!', 'ok');
+  abrirConsulta(chave);
 }
+$('btn-consulta-nova').addEventListener('click', abrirLeitura);
 
-function irParaPortal(chave){
-  chave = chave || ultimaChave;
-  if (!chave) return;
-  clearTimeout(timerRedir);
-  overlay.hidden = true;
-  fecharCamera(); // desliga a câmera antes de sair
-  window.location.href = URL_PORTAL + chave;
-}
-
-$('btn-cancelar').addEventListener('click', function(){
-  clearTimeout(timerRedir);
-  overlay.hidden = true;
-  ultimaChave = null;
-  voltarHome();
+$('btn-consulta-voltar').addEventListener('click', voltarHome);
+$('btn-consulta-copiar').addEventListener('click', function(){
+  if (ultimaChave) copiarTexto(formatarChave(ultimaChave));
 });
-$('btn-abrir-agora').addEventListener('click', function(){ irParaPortal(); });
+$('btn-consulta-abrir').addEventListener('click', function(){
+  if (ultimaChave) window.location.href = URL_PORTAL + ultimaChave;
+});
+// Embed experimental (fica em branco em muitos aparelhos por restrição de cookies da SEFAZ)
+$('btn-consulta-embed').addEventListener('click', function(){
+  if (!ultimaChave) return;
+  portalFrame.setAttribute('src', URL_PORTAL + ultimaChave);
+  $('iframe-wrap').scrollIntoView({ behavior: 'smooth' });
+});
 
 /* Desliga a câmera quando a página sai da visão (inclui redirecionamento) */
 window.addEventListener('pagehide', fecharCamera);
@@ -718,12 +767,14 @@ document.addEventListener('visibilitychange', function(){
 });
 
 /* ================= Botões principais ================= */
-$('btn-ler').addEventListener('click', function(){
+/** Abre a tela de leitura (mesmo caminho do botão da home e do “Nova leitura”). */
+function abrirLeitura(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     toast('Este navegador não suporta acesso à câmera. Use a digitação manual.', 'erro');
     return;
   }
   viewHome.hidden = true;
+  viewConsulta.hidden = true;
   viewScan.hidden = false;
   document.documentElement.style.overflow = 'hidden';
   abrirCamera(ultimoDispositivo).catch(function(err){
@@ -736,7 +787,8 @@ $('btn-ler').addEventListener('click', function(){
       setTimeout(function(){ if (!loopAtivo) voltarHome(); }, 2600);
     }
   });
-});
+}
+$('btn-ler').addEventListener('click', abrirLeitura);
 $('btn-tentar').addEventListener('click', function(){
   abrirCamera(selCamera.value || ultimoDispositivo).catch(function(err){
     console.warn(err);
@@ -767,6 +819,15 @@ $('input-chave').addEventListener('keydown', function(ev){
 
 /* ================= Inicialização ================= */
 renderizarHistorico();
+
+// Se o app foi fechado (ou a aba da SEFAZ) com uma consulta aberta,
+// reabre a tela de consulta com a última chave válida guardada.
+var ultimaGuardada = lerUltima();
+if (ultimaGuardada) abrirConsulta(ultimaGuardada);
+
+/* Gancho público (E2E/testes e atalho para digitação rápida):
+   __LNFE.mostrarResultado('44dígitos') — valida e abre a consulta embutida. */
+window.__LNFE = { mostrarResultado: mostrarResultado, abrirConsulta: abrirConsulta, salvarUltima: salvarUltima, lerUltima: lerUltima };
 })();
 </script>
 </body>
