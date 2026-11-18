@@ -633,10 +633,12 @@ function leitorZXing(){
   if (leitorZX) return leitorZX;
   try {
     leitorZX = new Z.MultiFormatReader();
-    leitorZX.setHints({
-      [Z.DecodeHintType.POSSIBLE_FORMATS]: [Z.BarcodeFormat.CODE_128],
-      [Z.DecodeHintType.TRY_HARDER]: true
-    });
+    // ATENÇÃO: esta versão do ZXing exige um Map real (setHints faz t.get),
+    // não um objeto literal — {..} quebra com "t.get is not a function".
+    leitorZX.setHints(new Map([
+      [Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128]],
+      [Z.DecodeHintType.TRY_HARDER, true]
+    ]));
   } catch (e) { leitorZX = null; }
   return leitorZX;
 }
