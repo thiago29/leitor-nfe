@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Leitor NF-e — Consulta por código de barras</title>
+<meta name="description" content="Lê o código de barras (chave de 44 dígitos) do DANFE e abre a consulta no Portal Nacional da NF-e.">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b3d91">
+<!-- PWA / tela de início no iPhone -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Leitor NF-e">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<!-- ZXing com versão fixa (fallback quando não há BarcodeDetector nativo) -->
+<script defer src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<style>
+  :root{
+    --azul:#0b3d91;
+    --fundo:#f4f5f8;
+    --cartao:#ffffff;
+    --texto:#14161a;
+    --suave:#4b5563;
+    --borda:#cfd4dc;
+    --primaria:#0b3d91;
+    --primaria-hover:#092f70;
+    --amarelo:#ffd23f;
+    --erro-bg:#fdecea;
+    --erro-texto:#b3261e;
+    --ok-bg:#e6f4ea;
+    --ok-texto:#1b7a2d;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --fundo:#0f1115;
+      --cartao:#1a1d24;
+      --texto:#f3f4f6;
+      --suave:#9ca3af;
+      --borda:#343a46;
+      --primaria:#2f6bd8;
+      --primaria-hover:#3d79e6;
+      --erro-bg:#3b1512;
+      --erro-texto:#ff8a80;
+      --ok-bg:#12301a;
+      --ok-texto:#7ed695;
+    }
+  }
+  *{ box-sizing:border-box; }
+  html, body{ margin:0; padding:0; }
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    background:var(--fundo);
+    color:var(--texto);
+    -webkit-text-size-adjust:100%;
+    overflow-x:hidden;
+    min-height:100vh;
+  }
+  header{
+    position:sticky; top:0; z-index:10;
+    background:var(--azul); color:#fff;
+    padding:max(10px, env(safe-area-inset-top)) 16px 12px;
+  }
+  header h1{ margin:0; font-size:1.35rem; letter-spacing:.2px; }
+  header p{ margin:2px 0 0; font-size:.85rem; opacity:.85; }
+  main{ max-width:600px; margin:0 auto; padding:16px 16px calc(24px + env(safe-area-inset-bottom)); }
+
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    min-height:52px; padding:10px 18px;
+    border:none; border-radius:12px; cursor:pointer;
+    font-size:1.05rem; font-weight:600;
+    background:var(--cartao); color:var(--texto);
+    border:1px solid var(--borda);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .btn:active{ transform:scale(.985); }
+  .btn-primario{
+    background:var(--primaria); color:#fff; border-color:transparent;
+    width:100%; font-size:1.15rem; min-height:58px;
+  }
+  .btn-primario:active{ background:var(--primaria-hover); }
+  .btn-perigo{ color:var(--erro-texto); }
+  .btn-pesado{ min-height:48px; font-size:.95rem; }
+
+  .card{
+    background:var(--cartao); border:1px solid var(--borda);
+    border-radius:14px; padding:16px; margin-top:16px;
+  }
+  .card h2{ margin:0 0 10px; font-size:1.05rem; }
+  .linha{ display:flex; gap:10px; align-items:stretch; }
+  .linha > *{ flex:1 1 auto; min-width:0; }
+
+  input[type="text"]{
+    width:100%; min-height:52px; padding:12px 14px;
+    font-size:16px; /* evita zoom automático no iOS */
+    border:1px solid var(--borda); border-radius:12px;
+    background:var(--fundo); color:var(--texto);
+    font-variant-numeric:tabular-nums;
+  }
+  select{
+    width:100%; min-height:48px; padding:8px 10px; font-size:1rem;
+    border:1px solid rgba(255,255,255,.4); border-radius:12px;
+    background:rgba(0,0,0,.55); color:#fff;
+  }
+  .aviso{ font-size:.9rem; color:var(--suave); margin:10px 0 0; }
+  .erro-msg{ font-size:.95rem; font-weight:600; color:var(--erro-texto); margin:10px 0 0; }
+
+  /* ===== Tela de leitura ===== */
+  #view-scan{
+    position:fixed; inset:0; z-index:50;
+    display:flex; flex-direction:column; background:#000;
+  }
+  #view-scan[hidden]{ display:none; }
+  #view-home[hidden]{ display:none; }
+  #area-video{ position:relative; flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#000; }
+  #video{ width:100%; height:100%; object-fit:contain; background:#000; }
+  #moldura{
+    position:absolute; left:7%; right:7%; top:50%; transform:translateY(-50%);
+    height:96px; border:3px solid var(--amarelo); border-radius:12px;
+    box-shadow:0 0 0 4000px rgba(0,0,0,.38);
+    pointer-events:none;
+  }
+  #dica{
+    position:absolute; left:0; right:0; bottom:12px;
+    text-align:center; color:#ffe08a; font-size:.95rem; font-weight:600;
+    padding:0 16px; pointer-events:none;
+  }
+  #barra-scan{
+    flex:0 0 auto; background:#000; color:#fff;
+    padding:10px 12px calc(12px + env(safe-area-inset-bottom));
+    display:flex; gap:10px; flex-wrap:wrap;
+  }
+  #barra-scan .btn{ background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.35); color:#fff; }
+  #btn-torch.on{ background:var(--amarelo); color:#111; border-color:transparent; }
+
+  /* ===== Overlay de resultado ===== */
+  #overlay{
+    position:fixed; inset:0; z-index:80;
+    background:rgba(0,0,0,.55);
+    display:flex; align-items:center; justify-content:center; padding:16px;
+  }
+  #overlay[hidden]{ display:none; }
+  .overlay-card{
+    background:var(--cartao); color:var(--texto);
+    border-radius:16px; padding:20px;
+    width:100%; max-width:480px; max-height:86vh; overflow-y:auto;
+  }
+  .overlay-card h2{ margin:0 0 6px; }
+  #chave-formatada{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:1.05rem; font-weight:700; letter-spacing:.5px; word-break:break-all;
+    background:var(--ok-bg); color:var(--ok-texto);
+    border-radius:10px; padding:12px; margin:10px 0;
+  }
+  #resumo{ margin:0 0 12px; }
+  .linha-resumo{
+    display:grid; grid-template-columns:150px 1fr; gap:8px;
+    padding:8px 0; border-bottom:1px solid var(--borda); font-size:.98rem;
+  }
+  .linha-resumo dt{ color:var(--suave); margin:0; }
+  .linha-resumo dd{ margin:0; font-weight:600; word-break:break-all; }
+  #aviso-redir{ font-size:.92rem; color:var(--suave); margin:0 0 14px; }
+  .acoes-overlay{ display:flex; gap:10px; }
+  .acoes-overlay .btn{ flex:1; }
+
+  /* ===== Histórico ===== */
+  #historico{ list-style:none; margin:0; padding:0; }
+  #historico li{
+    border:1px solid var(--borda); border-radius:12px;
+    padding:10px 12px; margin-top:10px; background:var(--fundo);
+  }
+  #historico code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:.9rem; word-break:break-all; font-variant-numeric:tabular-nums;
+  }
+  #historico .data{ display:block; font-size:.8rem; color:var(--suave); margin:4px 0 8px; }
+  #historico .acoes{ display:flex; gap:8px; }
+  #historico .acoes .btn{ flex:1; min-height:44px; font-size:.9rem; }
+  .vazio{ color:var(--suave); font-size:.92rem; margin:6px 0 0; }
+
+  /* ===== Toast ===== */
+  #toast{
+    position:fixed; left:50%; transform:translateX(-50%);
+    bottom:calc(20px + env(safe-area-inset-bottom));
+    z-index:99; max-width:min(92vw, 460px);
+    background:rgba(17,19,23,.96); color:#fff;
+    padding:12px 18px; border-radius:12px; text-align:center;
+    font-size:.98rem; font-weight:600;
+    border:2px solid transparent;
+    box-shadow:0 6px 24px rgba(0,0,0,.35);
+  }
+  #toast.ok{ border-color:var(--ok-texto); }
+  #toast.erro{ border-color:#ff6b5e; }
+  #toast[hidden]{ display:none; }
+
+  #banner-http{
+    background:var(--erro-bg); color:var(--erro-texto);
+    border-bottom:1px solid var(--erro-texto);
+    padding:10px 16px; font-size:.92rem; text-align:center;
+  }
+  noscript div{ padding:40px 16px; text-align:center; font-size:1.1rem; }
+</style>
+</head>
+<body>
+
+<div id="banner-http" hidden>A câmera só funciona em <b>HTTPS</b> (ou localhost). Publique o site ou sirva-o localmente para ler o código de barras.</div>
+
+<header>
+  <h1>💀 Leitor NF-e</h1>
+  <p>Ler o DANFE e consultar no Portal Nacional da NF-e</p>
+</header>
+
+<main>
+  <!-- ============ TELA INICIAL ============ -->
+  <section id="view-home" aria-label="Início">
+    <button id="btn-ler" class="btn btn-primario" type="button">📷 Ler código de barras</button>
+    <p class="aviso">Aponte a câmera traseira para o código de barras (CODE-128) impresso no DANFE, na horizontal.</p>
+
+    <div class="card">
+      <h2>Digitar ou colar a chave</h2>
+      <div class="linha">
+        <input id="input-chave" type="text" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false"
+               aria-label="Chave de acesso de 44 dígitos"
+               placeholder="Ex.: 5217 0914 0619 1300 0001 5500 1000 0000 0000 0000">
+        <button id="btn-consultar" class="btn" type="button">Consultar</button>
+      </div>
+      <p id="manual-erro" class="erro-msg" role="alert" hidden></p>
+    </div>
+
+    <div class="card">
+      <h2 style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        Histórico
+        <button id="btn-limpar" class="btn btn-pesado btn-perigo" type="button">Limpar histórico</button>
+      </h2>
+      <ul id="historico" aria-live="polite"></ul>
+      <p id="historico-vazio" class="vazio">Nenhuma consulta ainda. As últimas 20 chaves ficam salvas só neste aparelho.</p>
+    </div>
+  </section>
+
+  <!-- ============ TELA DE LEITURA ============ -->
+  <section id="view-scan" hidden aria-label="Leitura do código de barras">
+    <div id="area-video">
+      <video id="video" playsinline muted autoplay aria-label="Vídeo da câmera"></video>
+      <div id="moldura" aria-hidden="true"></div>
+      <p id="dica">Aproxime e mantenha o código na horizontal dentro da moldura.</p>
+    </div>
+    <div id="barra-scan">
+      <select id="sel-camera" aria-label="Escolher câmera"></select>
+      <button id="btn-torch" class="btn" type="button" hidden aria-label="Lanterna">💡 Lanterna</button>
+      <button id="btn-tentar" class="btn" type="button" title="Reabrir a câmera">↻ Tentar de novo</button>
+      <button id="btn-fechar" class="btn" type="button">✕ Fechar</button>
+    </div>
+  </section>
+</main>
+
+<!-- ============ OVERLAY: CHAVE VÁLIDA ============ -->
+<div id="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="overlay-titulo">
+  <div class="overlay-card">
+    <h2 id="overlay-titulo">✅ Chave válida</h2>
+    <p id="chave-formatada"></p>
+    <dl id="resumo"></dl>
+    <p id="aviso-redir">Abrindo a consulta no Portal Nacional da NF-e em instantes. Lá, resolva o captcha e clique em “Continuar”.</p>
+    <div class="acoes-overlay">
+      <button id="btn-cancelar" class="btn" type="button">Cancelar</button>
+      <button id="btn-abrir-agora" class="btn btn-primario" type="button">Abrir agora</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<canvas id="canvas" hidden aria-hidden="true"></canvas>
+
+<noscript><div>Este site precisa de JavaScript habilitado para funcionar.</div></noscript>
+
+<script>
+(function(){
+'use strict';
+
+/* ================= Configuração ================= */
+var URL_PORTAL = 'https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g=&nfe=';
+var TAMANHO_CHAVE = 44;
+var HIST_MAX = 20;
+var HIST_CHAVE = 'leitor-nfe:historico';
+var DELAY_REDIRECIONA_MS = 1500;
+
+var UF = {11:'RO',12:'AC',13:'AM',14:'RR',15:'PA',16:'AP',17:'TO',
+          21:'MA',22:'PI',23:'CE',24:'RN',25:'PB',26:'PE',27:'AL',28:'SE',
+          29:'BA',31:'MG',32:'ES',33:'RJ',35:'SP',41:'PR',42:'SC',43:'RS',
+          50:'MS',51:'MT',52:'GO',53:'DF'};
+var MODELOS = {'55':'NF-e','65':'NFC-e'};
+
+/* ================= Núcleo puro (validação/decodificação) ================= */
+// ::TEST:BEGIN
+
+/** Remove tudo que não for dígito. */
+function limparChave(bruta){
+  return String(bruta === null || bruta === undefined ? '' : bruta).replace(/\D+/g, '');
+}
+
+/**
+ * Valida a chave: 44 dígitos numéricos + dígito verificador (módulo 11).
+ * Pesos 2..9 (repetindo o ciclo), aplicados aos 43 primeiros dígitos
+ * da direita para a esquerda. Resto 0 ou 1 => DV 0; senão DV = 11 - resto.
+ */
+function dvValido(chave){
+  if (typeof chave !== 'string' || !/^\d{44}$/.test(chave)) return false;
+  var soma = 0, peso = 2, i;
+  for (i = 42; i >= 0; i--) {
+    soma += Number(chave.charAt(i)) * peso;
+    peso = (peso === 9) ? 2 : peso + 1;
+  }
+  var resto = soma % 11;
+  var dv = (resto === 0 || resto === 1) ? 0 : 11 - resto;
+  return Number(chave.charAt(43)) === dv;
+}
+
+/** Formata em grupos de 4 dígitos: "5217 0914 ..." */
+function formatarChave(chave){
+  return limparChave(chave).replace(/(.{4})/g, '$1 ').replace(/\s+$/, '');
+}
+
+/** Formata CNPJ (14) ou CPF (11); CNPJ/CPF vem sempre em 14 posições (CPF com zeros à esquerda). */
+function formatarDocumento(doc14){
+  if (!/^\d{14}$/.test(doc14)) return doc14;
+  if (doc14.charAt(0) === '0') {
+    var cpf = doc14.slice(-11);
+    return cpf.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+  }
+  return doc14.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+}
+
+/**
+ * Decodifica a chave (posições 1-based):
+ * cUF 1-2 | AAMM 3-6 | CNPJ/CPF 7-20 | modelo 21-22 | série 23-25 |
+ * número 26-34 | tpEmis 35 | código numérico 36-43 | DV 44.
+ * Retorna array de pares [rotulo, valor].
+ */
+function resumoChave(chave){
+  chave = limparChave(chave);
+  var uf = Number(chave.slice(0, 2));
+  var aa = chave.slice(2, 4);
+  var mm = chave.slice(4, 6);
+  var doc = chave.slice(6, 20);
+  var modelo = chave.slice(20, 22);
+  var serie = String(parseInt(chave.slice(22, 25), 10));
+  var numero = String(parseInt(chave.slice(25, 34), 10));
+  var tpEmis = chave.slice(34, 35);
+  var codNum = chave.slice(35, 43);
+  var dv = chave.slice(43, 44);
+  return [
+    ['UF', (uf in UF) ? UF[uf] : (uf + ' (?)')],
+    ['Emissão', mm + '/' + aa],
+    ['Emitente', formatarDocumento(doc)],
+    ['Modelo', (modelo in MODELOS) ? modelo + ' - ' + MODELOS[modelo] : modelo],
+    ['Série', serie],
+    ['Número', numero],
+    ['Tipo de emissão', tpEmis],
+    ['Código numérico', codNum],
+    ['DV', dv]
+  ];
+}
+
+// ::TEST:END
+
+/* ================= Referências de DOM ================= */
+function $(id){ return document.getElementById(id); }
+var viewHome   = $('view-home');
+var viewScan   = $('view-scan');
+var video      = $('video');
+var canvas     = $('canvas');
+var ctx        = canvas.getContext('2d', { willReadFrequently: true });
+var selCamera  = $('sel-camera');
+var btnTorch   = $('btn-torch');
+var overlay    = $('overlay');
+var toastEl    = $('toast');
+
+/* ================= Estado ================= */
+var streamAtual   = null;
+var loopAtivo     = false;
+var ultimoFrame   = 0;
+var ultimoInvalida = 0;
+var ultimaChave   = null;
+var timerRedir    = null;
+var ultimoDispositivo = null;
+var detBarra = null;      // BarcodeDetector nativo (se existir)
+var leitorZX = null;      // MultiFormatReader ZXing (cache)
+var aviseSemLeitor = false;
+var timerToast = null;
+
+try {
+  if ('BarcodeDetector' in window) {
+    try { detBarra = new BarcodeDetector({ formats: ['code_128'] }); }
+    catch (e) { detBarra = null; }
+  }
+} catch (e) { detBarra = null; }
+
+if (!window.isSecureContext && !/^localhost$/.test(location.hostname)) {
+  $('banner-http').hidden = false;
+}
+
+/* ================= Utilidades ================= */
+function vibrar(padrao){
+  try { if (navigator.vibrate) navigator.vibrate(padrao); } catch (e) {}
+}
+function toast(msg, tipo){
+  toastEl.textContent = msg;
+  toastEl.className = tipo || '';
+  toastEl.hidden = false;
+  clearTimeout(timerToast);
+  timerToast = setTimeout(function(){ toastEl.hidden = true; }, 2600);
+}
+
+/* ================= Histórico (localStorage sempre em try/catch) ================= */
+function lerHistorico(){
+  try {
+    var raw = window.localStorage.getItem(HIST_CHAVE);
+    var arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function gravarHistorico(arr){
+  try { window.localStorage.setItem(HIST_CHAVE, JSON.stringify(arr.slice(0, HIST_MAX))); }
+  catch (e) { /* modo privado ou sem espaço: ignora */ }
+}
+function addHistorico(chave){
+  var arr = lerHistorico();
+  arr.unshift({ chave: chave, data: new Date().toISOString() });
+  gravarHistorico(arr);
+  renderizarHistorico();
+}
+var fmtData = new Intl.DateTimeFormat('pt-BR',
+  { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+function renderizarHistorico(){
+  var ul = $('historico');
+  while (ul.firstChild) ul.removeChild(ul.firstChild);
+  var arr = lerHistorico();
+  $('historico-vazio').style.display = arr.length ? 'none' : 'block';
+  arr.forEach(function(item){
+    if (!item || typeof item.chave !== 'string') return;
+    var li = document.createElement('li');
+
+    var code = document.createElement('code');
+    code.textContent = formatarChave(item.chave);
+    li.appendChild(code);
+
+    var data = document.createElement('span');
+    data.className = 'data';
+    try { data.textContent = fmtData.format(new Date(item.data)); } catch (e) { data.textContent = ''; }
+    li.appendChild(data);
+
+    var acoes = document.createElement('div');
+    acoes.className = 'acoes';
+
+    var bReabrir = document.createElement('button');
+    bReabrir.type = 'button'; bReabrir.className = 'btn';
+    bReabrir.textContent = 'Reabrir consulta';
+    bReabrir.addEventListener('click', function(){ irParaPortal(item.chave); });
+
+    var bCopiar = document.createElement('button');
+    bCopiar.type = 'button'; bCopiar.className = 'btn';
+    bCopiar.textContent = 'Copiar chave';
+    bCopiar.addEventListener('click', function(){ copiarTexto(formatarChave(item.chave)); });
+
+    acoes.appendChild(bReabrir);
+    acoes.appendChild(bCopiar);
+    li.appendChild(acoes);
+    ul.appendChild(li);
+  });
+}
+
+function copiarTexto(texto){
+  function fallback(){
+    var ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    ta.remove();
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(texto)
+      .then(function(){ toast('Chave copiada.', 'ok'); })
+      .catch(fallback);
+  } else { fallback(); }
+}
+
+$('btn-limpar').addEventListener('click', function(){
+  if (!confirm('Apagar todo o histórico de consultas deste aparelho?')) return;
+  gravarHistorico([]);
+  renderizarHistorico();
+  toast('Histórico limpo.', 'ok');
+});
+
+/* ================= Câmera ================= */
+function fecharCamera(){
+  loopAtivo = false;
+  if (streamAtual) {
+    streamAtual.getTracks().forEach(function(t){ t.stop(); });
+    streamAtual = null;
+  }
+  if (video.srcObject) video.srcObject = null;
+  btnTorch.hidden = true;
+  btnTorch.classList.remove('on');
+}
+
+function voltarHome(){
+  fecharCamera();
+  viewScan.hidden = true;
+  viewHome.hidden = false;
+  document.documentElement.style.overflow = '';
+}
+
+function abrirCamera(dispositivoId){
+  return new Promise(function(resolver, rejeitar){
+    fecharCamera();
+    var videoCons = dispositivoId
+      ? { deviceId: { exact: dispositivoId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } };
+    navigator.mediaDevices.getUserMedia({ video: videoCons, audio: false })
+      .then(function(stream){
+        streamAtual = stream;
+        video.srcObject = stream;
+        return video.play();
+      })
+      .then(function(){
+        if (dispositivoId) ultimoDispositivo = dispositivoId;
+        else {
+          var tr = streamAtual.getVideoTracks()[0];
+          if (tr && tr.label) ultimoDispositivo = tr.deviceId || null;
+        }
+        preencherSeletores();
+        atualizarLanterna();
+        iniciarLoop();
+        resolver();
+      })
+      .catch(rejeitar);
+  });
+}
+
+function preencherSeletores(){
+  return navigator.mediaDevices.enumerateDevices().then(function(dispositivos){
+    var camaras = dispositivos.filter(function(d){ return d.kind === 'videoinput'; });
+    var anterior = selCamera.value;
+    while (selCamera.firstChild) selCamera.removeChild(selCamera.firstChild);
+    camaras.forEach(function(d, i){
+      var opt = document.createElement('option');
+      opt.value = d.deviceId || ('cam-' + i);
+      opt.textContent = d.label || ('Câmera ' + (i + 1));
+      selCamera.appendChild(opt);
+    });
+    var tr = streamAtual ? streamAtual.getVideoTracks()[0] : null;
+    if (tr && tr.deviceId) selCamera.value = tr.deviceId;
+    else if (anterior) selCamera.value = anterior;
+  }).catch(function(){ /* sem lista de dispositivos: segue com a câmera padrão */ });
+}
+
+function trackVideo(){
+  return (streamAtual && streamAtual.getVideoTracks()[0]) || null;
+}
+function atualizarLanterna(){
+  var t = trackVideo();
+  var caps = null;
+  try { if (t && t.getCapabilities) caps = t.getCapabilities(); } catch (e) {}
+  btnTorch.hidden = !(caps && caps.torch);
+  btnTorch.classList.toggle('on', !!(caps && caps.torch));
+}
+btnTorch.addEventListener('click', function(){
+  var t = trackVideo();
+  if (!t || !t.getCapabilities || !t.getCapabilities().torch) return;
+  var ligada = !!t.getCapabilities().torch;
+  t.applyConstraints({ advanced: [{ torch: !ligada }] })
+    .then(atualizarLanterna)
+    .catch(function(){ toast('Não foi possível alternar a lanterna.', 'erro'); });
+});
+selCamera.addEventListener('change', function(){
+  abrirCamera(selCamera.value).catch(function(err){
+    console.warn(err);
+    toast('Não foi possível trocar de câmera.', 'erro');
+  });
+});
+
+/* ================= Loop de decodificação ================= */
+function iniciarLoop(){
+  if (detBarra) { aviseSemLeitor = false; return; }
+  if (window.ZXing) { aviseSemLeitor = false; return; }
+  // A página carregou mas o CDN do ZXing ainda não chegou (ou falhou):
+  // o loop continua e tenta novamente a cada frame.
+  if (!aviseSemLeitor) {
+    aviseSemLeitor = true;
+    toast('Preparando leitor… (se demorar, use a digitação manual)', 'erro');
+  }
+}
+
+function leitorZXing(){
+  var Z = window.ZXing;
+  if (!Z) return null;
+  if (leitorZX) return leitorZX;
+  try {
+    leitorZX = new Z.MultiFormatReader();
+    leitorZX.setHints({
+      [Z.DecodeHintType.POSSIBLE_FORMATS]: [Z.BarcodeFormat.CODE_128],
+      [Z.DecodeHintType.TRY_HARDER]: true
+    });
+  } catch (e) { leitorZX = null; }
+  return leitorZX;
+}
+
+function decodificarZXing(){
+  var leitor = leitorZXing();
+  if (!leitor) return;
+  var w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h) return;
+  var escala = Math.min(1, 960 / w);
+  var cw = Math.max(2, Math.round(w * escala));
+  var ch = Math.max(2, Math.round(h * escala));
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+  ctx.drawImage(video, 0, 0, cw, ch);
+  var img = ctx.getImageData(0, 0, cw, ch);
+  var Z = window.ZXing;
+  var luma = new Z.LuminanceSource(img.data, cw, ch);
+  var bitmap = new Z.BinaryBitmap(luma);
+  var resultado = leitor.decode(bitmap); // lança NotFoundException se não achar
+  tratarLeitura(resultado.getText());
+}
+
+function tick(){
+  if (!loopAtivo) return;
+  requestAnimationFrame(tick);
+  if (document.hidden || video.readyState < 2) return;
+  var agora = performance.now();
+  if (agora - ultimoFrame < 40) return; // ~25 fps
+  ultimoFrame = agora;
+  if (detBarra) {
+    detBarra.detect(video).then(function(codigos){
+      if (!loopAtivo) return;
+      if (codigos && codigos.length > 0) tratarLeitura(codigos[0].rawValue);
+    }).catch(function(){ /* quadro sem código */ });
+  } else {
+    try { decodificarZXing(); }
+    catch (e) { /* NotFoundException etc.: segue lendo */ }
+  }
+}
+
+/* ================= Tratamento da leitura ================= */
+function feedbackInvalida(msg){
+  var agora = performance.now();
+  if (agora - ultimoInvalida < 1300) return;
+  ultimoInvalida = agora;
+  vibrar([120]);
+  toast(msg, 'erro');
+}
+
+function tratarLeitura(bruto){
+  if (!loopAtivo) return;
+  var chave = limparChave(bruto);
+  if (chave.length !== TAMANHO_CHAVE) {
+    feedbackInvalida(chave.length < TAMANHO_CHAVE
+      ? 'Leitura incompleta — aproxime e centralize na moldura.'
+      : 'Leitura inválida, tente novamente');
+    return;
+  }
+  if (!dvValido(chave)) {
+    feedbackInvalida('Leitura inválida, tente novamente');
+    return;
+  }
+  loopAtivo = false; // parou: chave boa
+  mostrarResultado(chave);
+}
+
+/* ================= Resultado + redirecionamento ================= */
+function mostrarResultado(chave){
+  ultimaChave = chave;
+  vibrar([80]);
+  $('chave-formatada').textContent = formatarChave(chave);
+  var dl = $('resumo');
+  while (dl.firstChild) dl.removeChild(dl.firstChild);
+  resumoChave(chave).forEach(function(par){
+    var linha = document.createElement('div');
+    linha.className = 'linha-resumo';
+    var dt = document.createElement('dt'); dt.textContent = par[0];
+    var dd = document.createElement('dd'); dd.textContent = par[1];
+    linha.appendChild(dt); linha.appendChild(dd);
+    dl.appendChild(linha);
+  });
+  addHistorico(chave);
+  overlay.hidden = false;
+  clearTimeout(timerRedir);
+  timerRedir = setTimeout(irParaPortal, DELAY_REDIRECIONA_MS);
+}
+
+function irParaPortal(chave){
+  chave = chave || ultimaChave;
+  if (!chave) return;
+  clearTimeout(timerRedir);
+  overlay.hidden = true;
+  fecharCamera(); // desliga a câmera antes de sair
+  window.location.href = URL_PORTAL + chave;
+}
+
+$('btn-cancelar').addEventListener('click', function(){
+  clearTimeout(timerRedir);
+  overlay.hidden = true;
+  ultimaChave = null;
+  voltarHome();
+});
+$('btn-abrir-agora').addEventListener('click', function(){ irParaPortal(); });
+
+/* Desliga a câmera quando a página sai da visão (inclui redirecionamento) */
+window.addEventListener('pagehide', fecharCamera);
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden) fecharCamera();
+});
+
+/* ================= Botões principais ================= */
+$('btn-ler').addEventListener('click', function(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast('Este navegador não suporta acesso à câmera. Use a digitação manual.', 'erro');
+    return;
+  }
+  viewHome.hidden = true;
+  viewScan.hidden = false;
+  document.documentElement.style.overflow = 'hidden';
+  abrirCamera(ultimoDispositivo).catch(function(err){
+    console.warn(err);
+    var msg = (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'))
+      ? 'Permissão da câmera negada. Autorize nas configurações e tente de novo.'
+      : 'Não foi possível abrir a câmera. Toque em “Tentar de novo”.';
+    toast(msg, 'erro');
+    if (!(streamAtual && streamAtual.getVideoTracks().length)) {
+      setTimeout(function(){ if (!loopAtivo) voltarHome(); }, 2600);
+    }
+  });
+});
+$('btn-tentar').addEventListener('click', function(){
+  abrirCamera(selCamera.value || ultimoDispositivo).catch(function(err){
+    console.warn(err);
+    toast('Não foi possível abrir a câmera. Tente novamente.', 'erro');
+  });
+});
+$('btn-fechar').addEventListener('click', voltarHome);
+
+/* Entrada manual */
+function consultarManual(){
+  var campo = $('input-chave');
+  var erro = $('manual-erro');
+  var valor = limparChave(campo.value);
+  if (valor.length !== TAMANHO_CHAVE || !dvValido(valor)) {
+    erro.textContent = 'Chave inválida: confirme que são 44 dígitos com o dígito verificador correto.';
+    erro.hidden = false;
+    vibrar([120]);
+    return;
+  }
+  erro.hidden = true;
+  campo.value = '';
+  mostrarResultado(valor);
+}
+$('btn-consultar').addEventListener('click', consultarManual);
+$('input-chave').addEventListener('keydown', function(ev){
+  if (ev.key === 'Enter') { ev.preventDefault(); consultarManual(); }
+});
+
+/* ================= Inicialização ================= */
+renderizarHistorico();
+})();
+</script>
+</body>
+</html>
