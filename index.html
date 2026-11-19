@@ -410,7 +410,9 @@ var aviseSemLeitor = false;
 var timerToast = null;
 
 try {
-  if ('BarcodeDetector' in window) {
+  // ?zx na URL força o fallback ZXing (útil p/ testar o caminho do Safari/iPhone)
+var forcarZxing = /[?&](zx|zxing)(?:&|$|=)/.test(location.search);
+if (!forcarZxing && 'BarcodeDetector' in window) {
     try { detBarra = new BarcodeDetector({ formats: ['code_128'] }); }
     catch (e) { detBarra = null; }
   }
@@ -617,14 +619,17 @@ selCamera.addEventListener('change', function(){
 
 /* ================= Loop de decodificação ================= */
 function iniciarLoop(){
-  if (detBarra) { aviseSemLeitor = false; return; }
-  if (window.ZXing) { aviseSemLeitor = false; return; }
-  // A página carregou mas o CDN do ZXing ainda não chegou (ou falhou):
-  // o loop continua e tenta novamente a cada frame.
-  if (!aviseSemLeitor) {
-    aviseSemLeitor = true;
+  if (loopAtivo) return;
+  loopAtivo = true;
+  ultimoFrame = 0;
+  // Nem detector nativo nem ZXing ainda carregados: o loop fica rodando
+  // mesmo assim e começa a decodificar assim que um dos dois existir.
+  var pronto = !!(detBarra || window.ZXing);
+  aviseSemLeitor = false;
+  if (!pronto && !aviseSemLeitor) {
     toast('Preparando leitor… (se demorar, use a digitação manual)', 'erro');
   }
+  requestAnimationFrame(tick);
 }
 
 function leitorZXing(){
@@ -655,8 +660,16 @@ function decodificarZXing(){
   ctx.drawImage(video, 0, 0, cw, ch);
   var img = ctx.getImageData(0, 0, cw, ch);
   var Z = window.ZXing;
-  var luma = new Z.LuminanceSource(img.data, cw, ch);
-  var bitmap = new Z.BinaryBitmap(luma);
+  // BUG FIX: img.data é RGBA (4 canais). LuminanceSource espera canal único (cinza).
+  // Passar RGBA direto corrompia o quadro (índices deslocados) e o decoder nunca
+  // encontrava o código — era o motivo de "abre câmera mas não lê" no Safari/iPhone.
+  var d = img.data, cinza = new Uint8Array(cw * ch);
+  for (var k = 0, m = 0; m < cw * ch; k += 4, m++) {
+    cinza[m] = (d[k] * 77 + d[k+1] * 150 + d[k+2] * 29) >> 8;
+  }
+  var luma = new Z.RGBLuminanceSource(cinza, cw, ch);
+  var binarizer = new Z.HybridBinarizer(luma);
+  var bitmap = new Z.BinaryBitmap(binarizer);
   var resultado = leitor.decode(bitmap); // lança NotFoundException se não achar
   tratarLeitura(resultado.getText());
 }
