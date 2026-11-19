@@ -146,6 +146,8 @@
   .consulta-topo h1{ margin:0; font-size:1.15rem; }
   .consulta-topo .linha-botoes{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
   .consulta-topo .btn{ min-height:44px; font-size:.9rem; flex:1 1 auto; padding:8px 10px; }
+  .coluna-botoes{ display:flex; flex-direction:column; gap:10px; max-width:420px; width:calc(100% - 32px); margin:4px auto 0; }
+  .coluna-botoes .btn{ width:100%; }
   #consulta-chave{
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     font-size:.95rem; font-weight:700; letter-spacing:.4px; word-break:break-all; text-align:center;
@@ -250,8 +252,13 @@
 
   <!-- ============ TELA INICIAL ============ -->
   <section id="view-home" aria-label="Início">
-    <button id="btn-ler" class="btn btn-primario" type="button">📷 Ler código de barras</button>
-    <p class="aviso">Aponte a câmera traseira para o código de barras (CODE-128) impresso no DANFE, na horizontal.</p>
+    <div class="coluna-botoes">
+      <button id="btn-ler" class="btn btn-primario" type="button">📷 Ler código de barras</button>
+      <button id="btn-foto" class="btn" type="button">🖼️ Não tá lendo? Ler da foto</button>
+    </div>
+    <input type="file" id="input-foto" accept="image/*" hidden aria-hidden="true">
+    <p class="aviso">Aponte a câmera traseira para o código de barras (CODE-128) do DANFE, na horizontal.<br>
+    <b>Se a câmera não conseguir:</b> tire uma foto do código com o celular (bem nítida, de frente) e toque em “Ler da foto”.</p>
 
     <div class="card">
       <h2>Digitar ou colar a chave</h2>
@@ -279,7 +286,7 @@
     <div id="area-video">
       <video id="video" playsinline muted autoplay aria-label="Vídeo da câmera"></video>
       <div id="moldura" aria-hidden="true"></div>
-      <p id="dica">Aproxime e mantenha o código na horizontal dentro da moldura.</p>
+      <p id="dica">Aproxime até o código ocupar boa parte da tela e mantenha na horizontal dentro da moldura. Se demorar: use “Ler da foto” na tela inicial.</p>
     </div>
     <div id="barra-scan">
       <select id="sel-camera" aria-label="Escolher câmera"></select>
@@ -391,6 +398,7 @@ var viewScan   = $('view-scan');
 var viewConsulta = $('view-consulta');
 var portalFrame  = $('portal-frame');
 var video      = $('video');
+var inputFoto  = $('input-foto');
 var canvas     = $('canvas');
 var ctx        = canvas.getContext('2d', { willReadFrequently: true });
 var selCamera  = $('sel-camera');
@@ -410,9 +418,9 @@ var aviseSemLeitor = false;
 var timerToast = null;
 
 try {
-  // ?zx na URL força o fallback ZXing (útil p/ testar o caminho do Safari/iPhone)
-var forcarZxing = /[?&](zx|zxing)(?:&|$|=)/.test(location.search);
-if (!forcarZxing && 'BarcodeDetector' in window) {
+  // Detector nativo (Safari/iPhone) — agora roda EM PARALELO com o ZXing
+  // em vez de competir com ele (o nativo sozinho falhava com código pequeno).
+if ('BarcodeDetector' in window) {
     try { detBarra = new BarcodeDetector({ formats: ['code_128'] }); }
     catch (e) { detBarra = null; }
   }
@@ -648,30 +656,57 @@ function leitorZXing(){
   return leitorZX;
 }
 
+/** Tenta decodificar um buffer RGBA com o ZXing. Retorna o texto ou null.
+    Comprovado em Node: cinza (pesos 77/150/29) → RGBLuminanceSource →
+    HybridBinarizer → BinaryBitmap é o pipeline que lê CODE-128 do DANFE. */
+function decodificarRGBA(d, cw, ch){
+  var leitor = leitorZXing();
+  if (!leitor || !d || !cw || !ch) return null;
+  var Z = window.ZXing;
+  var cinza = new Uint8Array(cw * ch);
+  for (var k = 0, m = 0; m < cw * ch; k += 4, m++) {
+    cinza[m] = (d[k] * 77 + d[k+1] * 150 + d[k+2] * 29) >> 8;
+  }
+  var luma = new Z.RGBLuminanceSource(cinza, cw, ch);
+  try {
+    return leitor.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(luma))).getText();
+  } catch (e) {
+    // 2ª chance com binarizador global (histograma inteiro, não por blocos):
+    // cenas com luz desigual respondem melhor a ele.
+    try {
+      return leitor.decode(new Z.BinaryBitmap(new Z.GlobalHistogramBinarizer(luma))).getText();
+    } catch (e2) { return null; }
+  }
+}
+
+/** Redimensiona (nearest-neighbor, preserva as bordas nítidas das barras)
+    e devolve o buffer RGBA no tamanho pedido. */
+function redimensionar(srcD, sw, sh, tw){
+  var th = Math.max(8, Math.round(sh * tw / sw));
+  var out = new Uint8ClampedArray(tw * th * 4).fill(255);
+  for (var y = 0; y < th; y++) {
+    var sy = Math.min(sh - 1, Math.floor(y * sh / th));
+    for (var x = 0; x < tw; x++) {
+      var sx = Math.min(sw - 1, Math.floor(x * sw / tw));
+      var di = (y * tw + x) * 4, si = (sy * sw + sx) * 4;
+      out[di] = srcD[si]; out[di+1] = srcD[si+1]; out[di+2] = srcD[si+2]; out[di+3] = 255;
+    }
+  }
+  return { d: out, w: tw, h: th };
+}
+
 function decodificarZXing(){
   var leitor = leitorZXing();
   if (!leitor) return;
   var w = video.videoWidth, h = video.videoHeight;
   if (!w || !h) return;
-  var escala = Math.min(1, 960 / w);
+  var escala = Math.min(1, 1920 / w); // era 960 — redimensionava demais e o código pequeno morria (comprovado em Node)
   var cw = Math.max(2, Math.round(w * escala));
   var ch = Math.max(2, Math.round(h * escala));
   if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
   ctx.drawImage(video, 0, 0, cw, ch);
   var img = ctx.getImageData(0, 0, cw, ch);
-  var Z = window.ZXing;
-  // BUG FIX: img.data é RGBA (4 canais). LuminanceSource espera canal único (cinza).
-  // Passar RGBA direto corrompia o quadro (índices deslocados) e o decoder nunca
-  // encontrava o código — era o motivo de "abre câmera mas não lê" no Safari/iPhone.
-  var d = img.data, cinza = new Uint8Array(cw * ch);
-  for (var k = 0, m = 0; m < cw * ch; k += 4, m++) {
-    cinza[m] = (d[k] * 77 + d[k+1] * 150 + d[k+2] * 29) >> 8;
-  }
-  var luma = new Z.RGBLuminanceSource(cinza, cw, ch);
-  var binarizer = new Z.HybridBinarizer(luma);
-  var bitmap = new Z.BinaryBitmap(binarizer);
-  var resultado = leitor.decode(bitmap); // lança NotFoundException se não achar
-  tratarLeitura(resultado.getText());
+  tratarLeitura(decodificarRGBA(img.data, cw, ch));
 }
 
 function tick(){
@@ -679,17 +714,80 @@ function tick(){
   requestAnimationFrame(tick);
   if (document.hidden || video.readyState < 2) return;
   var agora = performance.now();
-  if (agora - ultimoFrame < 40) return; // ~25 fps
+  // Sem nativo, o ZXing decide sozinho: roda mais devagar (~12 fps).
+  // Com nativo, tenta os dois a cada ~40 ms (nativo é leve, ZXing é pesado
+  // mas agora sempre roda — antes só rodava quando NÃO havia nativo).
+  if (agora - ultimoFrame < (detBarra ? 40 : 80)) return;
   ultimoFrame = agora;
   if (detBarra) {
     detBarra.detect(video).then(function(codigos){
       if (!loopAtivo) return;
       if (codigos && codigos.length > 0) tratarLeitura(codigos[0].rawValue);
     }).catch(function(){ /* quadro sem código */ });
-  } else {
-    try { decodificarZXing(); }
-    catch (e) { /* NotFoundException etc.: segue lendo */ }
   }
+  try { decodificarZXing(); }
+  catch (e) { /* NotFoundException etc.: segue lendo */ }
+}
+
+/* ================= Leitura por foto (modo infalível de campo) ================= */
+/** Carrega a foto escolhida em resolução cheia e tenta várias estratégias:
+    1. escala natural + 1.5x / 0.75x (o código pequeno pede zoom digital)
+    2. se nada ler: rotação de 180° (foto invertida) nas mesmas escalas
+    3. por fim, recorte central horizontal (faixa do código) para reduzir ruído */
+function lerFotoDaCameraErro(erro){
+  console.warn('lerFoto:', erro);
+  toast('Não consegui abrir a foto. Tente outra imagem.', 'erro');
+}
+function lerDaFoto(file){
+  if (!file) return;
+  toast('Analisando a foto…', '');
+  var url = URL.createObjectURL(file);
+  var img = new Image();
+  img.onload = function(){
+    URL.revokeObjectURL(url);
+    try {
+      var w = img.naturalWidth || img.width;
+      var h = img.naturalHeight || img.height;
+      if (!w || !h) throw new Error('imagem sem dimensões');
+      var c = document.createElement('canvas'); c.width = w; c.height = h;
+      var cx2 = c.getContext('2d', { willReadFrequently: true });
+      cx2.drawImage(img, 0, 0, w, h);
+      var base = cx2.getImageData(0, 0, w, h).data;
+
+      function tentar(tw, rot180){
+        var cw = rot180 ? w : tw, ch = rot180 ? h : Math.max(8, Math.round(h * tw / w));
+        var cc = document.createElement('canvas'); cc.width = cw; cc.height = ch;
+        var ccx = cc.getContext('2d', { willReadFrequently: true });
+        if (rot180) { ccx.translate(cw, ch); ccx.rotate(Math.PI); }
+        ccx.drawImage(img, 0, 0, cw, ch);
+        return decodificarRGBA(ccx.getImageData(0, 0, cw, ch).data, cw, ch);
+      }
+
+      var escalas = [];
+      var nativa = Math.min(w, 2400);
+      [nativa, Math.round(nativa * 1.5), Math.round(nativa * 0.75)].forEach(function(tw){
+        if (tw >= 64 && escalas.indexOf(tw) < 0) escalas.push(tw);
+      });
+      for (var i = 0; i < escalas.length; i++) {
+        var t = tentar(escalas[i], false);
+        if (t && validarLeitura(t)) { loopAtivo = false; mostrarResultado(validarLeitura(t)); return; }
+        t = tentar(escalas[i], true);
+        if (t && validarLeitura(t)) { loopAtivo = false; mostrarResultado(validarLeitura(t)); return; }
+      }
+      // última cartada: faixa horizontal central (onde o código costuma estar),
+      // ampliada para 1600px — remove o papel/ruído ao redor.
+      var fy = Math.floor(h * 0.30), fh = Math.floor(h * 0.40);
+      var fw = Math.min(w, 1600);
+      var fc = document.createElement('canvas'); fc.width = fw; fc.height = Math.round(fh * fw / w);
+      var fcx = fc.getContext('2d', { willReadFrequently: true });
+      fcx.drawImage(img, 0, fy, w, fh, 0, 0, fc.width, fc.height);
+      t = decodificarRGBA(fcx.getImageData(0, 0, fc.width, fc.height).data, fc.width, fc.height);
+      if (t && validarLeitura(t)) { loopAtivo = false; mostrarResultado(validarLeitura(t)); return; }
+      feedbackInvalida('Não achei um código nessa foto. Tire de frente, mais perto e bem nítida.');
+    } catch (e) { lerFotoDaCameraErro(e); }
+  };
+  img.onerror = function(){ URL.revokeObjectURL(url); toast('Não consegui abrir a foto.', 'erro'); };
+  img.src = url;
 }
 
 /* ================= Tratamento da leitura ================= */
@@ -701,17 +799,22 @@ function feedbackInvalida(msg){
   toast(msg, 'erro');
 }
 
+/** Valida o bruto lido (câmera OU foto): devolve a chave de 44 dígitos ou null. */
+function validarLeitura(bruto){
+  var chave = limparChave(bruto);
+  if (chave.length !== TAMANHO_CHAVE) return null;
+  if (!dvValido(chave)) return null;
+  return chave;
+}
+
 function tratarLeitura(bruto){
   if (!loopAtivo) return;
-  var chave = limparChave(bruto);
-  if (chave.length !== TAMANHO_CHAVE) {
-    feedbackInvalida(chave.length < TAMANHO_CHAVE
+  var chave = validarLeitura(bruto);
+  if (!chave) {
+    var n = limparChave(bruto).length;
+    feedbackInvalida(n < TAMANHO_CHAVE
       ? 'Leitura incompleta — aproxime e centralize na moldura.'
       : 'Leitura inválida, tente novamente');
-    return;
-  }
-  if (!dvValido(chave)) {
-    feedbackInvalida('Leitura inválida, tente novamente');
     return;
   }
   loopAtivo = false; // parou: chave boa
@@ -804,6 +907,12 @@ function abrirLeitura(){
   });
 }
 $('btn-ler').addEventListener('click', abrirLeitura);
+$('btn-foto').addEventListener('click', function(){ inputFoto.click(); });
+inputFoto.addEventListener('change', function(ev){
+  var f = ev.target.files && ev.target.files[0];
+  ev.target.value = ''; // permite escolher a MESMA foto de novo
+  if (f) lerDaFoto(f);
+});
 $('btn-tentar').addEventListener('click', function(){
   abrirCamera(selCamera.value || ultimoDispositivo).catch(function(err){
     console.warn(err);
