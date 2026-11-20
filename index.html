@@ -106,6 +106,7 @@
     background:rgba(0,0,0,.55); color:#fff;
   }
   .aviso{ font-size:.9rem; color:var(--suave); margin:10px 0 0; }
+.footer-v{ text-align:center; font-size:.72rem; color:var(--suave); padding:6px 0 calc(8px + env(safe-area-inset-bottom)); opacity:.7; }
   .erro-msg{ font-size:.95rem; font-weight:600; color:var(--erro-texto); margin:10px 0 0; }
 
   /* ===== Tela de leitura ===== */
@@ -237,7 +238,7 @@
         <button id="btn-consulta-copiar" class="btn" type="button">Copiar chave</button>
       </div>
       <button id="btn-consulta-abrir" class="btn btn-primario" type="button" style="width:100%; margin-top:10px;">🧾 Abrir a consulta oficial</button>
-      <p style="margin:8px 0 0; font-size:.8rem; opacity:.85;">Preencha o captcha e toque em “Continuar” lá. Ao terminar, volte com o gesto/botão — a chave continua guardada aqui.</p>
+      <p style="margin:8px 0 0; font-size:.8rem; opacity:.85;">Lá você vai ver o <b>hCaptcha</b>: marque a caixinha ao lado de <b>“Sou um humano”</b> e toque em <b>Continuar</b>. O resumo da NF-e aparece na hora. A chave continua guardada aqui.</p>
     </div>
     <p id="consulta-chave" class="consulta-chave"></p>
     <dl id="consulta-resumo" class="consulta-resumo"></dl>
@@ -295,6 +296,8 @@
       <button id="btn-fechar" class="btn" type="button">✕ Fechar</button>
     </div>
   </section>
+
+<footer id="footer-v" class="footer-v">v3.1</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
