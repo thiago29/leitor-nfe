@@ -82,6 +82,13 @@
     width:100%; font-size:1.15rem; min-height:58px;
   }
   .btn-primario:active{ background:var(--primaria-hover); }
+  /* CTA de destaque dentro do cabeçalho azul: amarelo vivo + sombra (azul sobre azul some — v3.2) */
+  .btn-destaque{
+    background:var(--amarelo); color:#14161a; border:none;
+    width:100%; font-size:1.12rem; font-weight:700; min-height:58px;
+    box-shadow:0 3px 0 rgba(0,0,0,.35);
+  }
+  .btn-destaque:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.35); }
   .btn-perigo{ color:var(--erro-texto); }
   .btn-pesado{ min-height:48px; font-size:.95rem; }
 
@@ -237,7 +244,7 @@
         <button id="btn-consulta-nova" class="btn" type="button">📷 Nova leitura</button>
         <button id="btn-consulta-copiar" class="btn" type="button">Copiar chave</button>
       </div>
-      <button id="btn-consulta-abrir" class="btn btn-primario" type="button" style="width:100%; margin-top:10px;">🧾 Abrir a consulta oficial</button>
+      <button id="btn-consulta-abrir" class="btn btn-destaque" type="button">🧾 Abrir a consulta oficial →</button>
       <p style="margin:8px 0 0; font-size:.8rem; opacity:.85;">Lá você vai ver o <b>hCaptcha</b>: marque a caixinha ao lado de <b>“Sou um humano”</b> e toque em <b>Continuar</b>. O resumo da NF-e aparece na hora. A chave continua guardada aqui.</p>
     </div>
     <p id="consulta-chave" class="consulta-chave"></p>
@@ -297,7 +304,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v3.1</footer>
+<footer id="footer-v" class="footer-v">v3.2</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
