@@ -174,6 +174,13 @@
   .iframe-portal[hidden]{ display:none; }
   #embed-box{ margin-bottom:10px; }
   .iframe-legenda{ font-size:.85rem; color:var(--suave); text-align:center; margin:8px 0 0; }
+  /* v4: carregamento do portal embutido */
+  #iframe-loader{ margin:10px 16px calc(12px + env(safe-area-inset-bottom)); padding:18px 16px; text-align:center;
+    background:var(--cartao); border:1px dashed var(--borda); border-radius:14px; color:var(--suave); font-size:.95rem; line-height:1.5; }
+  #iframe-loader[hidden]{ display:none; }
+  .spinner{ width:34px; height:34px; margin:0 auto 10px; border-radius:50%;
+    border:3px solid var(--borda); border-top-color:var(--primaria); animation:lnfe-spin .9s linear infinite; }
+  @keyframes lnfe-spin{ to{ transform:rotate(360deg); } }
   .consulta-aviso{
     margin:10px 16px 0; padding:12px 14px; border-radius:12px;
     background:var(--erro-bg); color:var(--erro-texto); font-size:.92rem; line-height:1.45;
@@ -245,17 +252,24 @@
         <button id="btn-consulta-nova" class="btn" type="button">📷 Nova leitura</button>
         <button id="btn-consulta-copiar" class="btn" type="button">Copiar chave</button>
       </div>
-      <button id="btn-consulta-abrir" class="btn btn-destaque" type="button">🧾 Abrir a consulta oficial →</button>
-      <p style="margin:8px 0 0; font-size:.8rem; opacity:.85;">Lá você vai ver o <b>hCaptcha</b>: marque a caixinha ao lado de <b>“Sou um humano”</b> e toque em <b>Continuar</b>. O resumo da NF-e aparece na hora. A chave continua guardada aqui.</p>
+      <button id="btn-consulta-abrir" class="btn btn-destaque" type="button">🧾 Abrir a consulta oficial (separada) ↗</button>
+      <p style="margin:8px 0 0; font-size:.8rem; opacity:.85;">Abaixo carrega a consulta oficial <b>dentro do app</b>: marque <b>“Sou um humano”</b> e toque em <b>Continuar</b> lá embaixo — sem sair daqui.</p>
     </div>
     <p id="consulta-chave" class="consulta-chave"></p>
     <dl id="consulta-resumo" class="consulta-resumo"></dl>
+    <div id="iframe-loader">
+      <div class="spinner" id="loader-spinner" aria-hidden="true"></div>
+      <span id="loader-msg">Carregando a consulta oficial da SEFAZ…</span>
+    </div>
     <div class="iframe-wrap">
-      <div id="embed-box">
-        <button id="btn-consulta-embed" class="btn" type="button" style="width:100%;">📎 Carregar a consulta aqui dentro (experimental)</button>
-        <p class="iframe-legenda">O site da SEFAZ costuma bloquear a exibição embutida em celulares (restrição de cookies); se aparecer em branco, use <b>Abrir a consulta oficial</b>.</p>
+      <div id="embed-box" hidden>
+        <p class="iframe-legenda"><b>A consulta embutida não carregou neste aparelho</b> (limitação comum de cookies em modo privado). Toque em tentar de novo — ou use o botão amarelo acima para abrir em aba separada.</p>
+        <div class="linha" style="margin-top:10px;">
+          <button id="btn-portal-retry" class="btn" type="button">↻ Tentar de novo aqui</button>
+          <a id="link-portal-abrir" class="btn" target="_blank" rel="noopener">Abrir em aba separada ↗</a>
+        </div>
       </div>
-      <iframe id="portal-frame" class="iframe-portal" title="Portal Nacional da NF-e" referrerpolicy="no-referrer" hidden></iframe>
+      <iframe id="portal-frame" class="iframe-portal" title="Portal Nacional da NF-e (consulta embutida)" referrerpolicy="no-referrer" allow="autoplay"></iframe>
     </div>
   </section>
 
@@ -305,7 +319,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v3.2</footer>
+<footer id="footer-v" class="footer-v">v4.0</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -317,6 +331,10 @@
 'use strict';
 
 /* ================= Configuração ================= */
+/* v4: a consulta carrega EMBUTIDA pelo proxy do nosso domínio (/portal/…) —
+   cookies de 1ª parte fazem o hCaptcha renderizar dentro do app. A URL direta
+   da SEFAZ segue servindo apenas como fallback (aba separada). */
+var URL_PORTAL_PROXIEDA = '/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g=&nfe=';
 var URL_PORTAL = 'https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g=&nfe=';
 var TAMANHO_CHAVE = 44;
 var HIST_MAX = 20;
@@ -851,10 +869,11 @@ function abrirConsulta(chave){
     dl.appendChild(linha);
   });
 
-  // reseta o embed experimental (só carrega quando o usuário pede)
+  // v4: auto-carrega a consulta oficial embutida (via proxy /portal, mesma origem)
   portalFrame.hidden = true;
   portalFrame.removeAttribute('src');
-  $('embed-box').style.display = '';
+  $('embed-box').hidden = true;
+  iniciarPortalEmbed(chave);
 
   viewHome.hidden = true;
   viewScan.hidden = true;
@@ -882,11 +901,85 @@ $('btn-consulta-copiar').addEventListener('click', function(){
 $('btn-consulta-abrir').addEventListener('click', function(){
   if (ultimaChave) window.location.href = URL_PORTAL + ultimaChave;
 });
-// Embed experimental (fica em branco em muitos aparelhos por restrição de cookies da SEFAZ)
-$('btn-consulta-embed').addEventListener('click', function(){
-  if (!ultimaChave) return;
-  portalFrame.setAttribute('src', URL_PORTAL + ultimaChave);
-  $('iframe-wrap').scrollIntoView({ behavior: 'smooth' });
+
+/* ================= v4: consulta oficial embutida (proxy /portal) =================
+   Estados:
+   1. spinner "Carregando…"            → portal ainda abrindo
+   2. banner "Marque Sou um humano"     → hCaptcha pronto (banner fica visível)
+   3. banner "✅ Consulta enviada"       → form submetido, aguardando resposta
+   4. painel de fallback                → não carregou NUNCA: tentar de novo / aba separada
+   Depois que o captcha já foi visto, página vazia é normal (form postando):
+   o fallback NÃO dispara mais — só o timeout inicial decide. */
+var embedPollTimer = null;
+var embedFalhaTimer = null;
+var embedSawCaptcha = false;
+function portalLoader(msg, girando){
+  $('loader-msg').innerHTML = msg;
+  $('loader-spinner').style.display = girando ? '' : 'none';
+}
+function esconderPortalLoader(){ $('iframe-loader').hidden = true; }
+function portalFrameSaudavel(){
+  var doc = null;
+  try { doc = portalFrame.contentDocument; } catch (e) { return false; }
+  if (!doc || !doc.body) return false;
+  try {
+    var t = doc.body.textContent || '';
+    return !/(chrome-error|http-error|ERR_)/i.test(t);
+  } catch (e) { return true; }
+}
+function mostrarFallbackPortal(){
+  esconderPortalLoader();
+  portalFrame.hidden = true;
+  var box = $('embed-box');
+  box.hidden = false;
+  try { $('link-portal-abrir').href = URL_PORTAL + ultimaChave; } catch (e) {}
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function atualizarStatusEmbed(){
+  var doc = null;
+  try { doc = portalFrame.contentDocument; } catch (e) { doc = null; }
+  if (!doc || !doc.body) return; // ainda navegando: aguarda
+  var t = doc.body.textContent || '';
+  var btnCaptcha = doc.getElementById('ctl00_ContentPlaceHolder1_btnConsultarHCaptcha');
+  if (t.length < 80) {
+    // vazio: load inicial OU form postando — só cai em fallback se nunca viu o captcha
+    if (!embedSawCaptcha && !embedFalhaTimer) {
+      embedFalhaTimer = setTimeout(function(){
+        embedFalhaTimer = null;
+        if (!portalFrameSaudavel()) mostrarFallbackPortal();
+      }, 9000);
+    }
+    return;
+  }
+  if (embedFalhaTimer) { clearTimeout(embedFalhaTimer); embedFalhaTimer = null; }
+  portalFrame.hidden = false;
+  if (btnCaptcha) {
+    embedSawCaptcha = true;
+    portalLoader('👇 Na caixa abaixo, marque <b>“Sou um humano”</b> e toque em <b>Continuar</b>.', false);
+  } else if (embedSawCaptcha) {
+    portalLoader('✅ Consulta enviada — os dados da NF-e aparecem na caixa abaixo.', false);
+  }
+}
+function iniciarPortalEmbed(chave){
+  if (!chave) return;
+  clearInterval(embedPollTimer);
+  clearTimeout(embedFalhaTimer);
+  embedFalhaTimer = null;
+  embedSawCaptcha = false;
+  $('iframe-loader').hidden = false;
+  portalLoader('Carregando a consulta oficial da SEFAZ…', true);
+  portalFrame.hidden = true;
+  portalFrame.removeAttribute('src');
+  embedFalhaTimer = setTimeout(function(){
+    embedFalhaTimer = null;
+    if (!embedSawCaptcha && !portalFrameSaudavel()) mostrarFallbackPortal();
+  }, 14000);
+  portalFrame.setAttribute('src', URL_PORTAL_PROXIEDA + chave);
+  embedPollTimer = setInterval(atualizarStatusEmbed, 2000);
+  setTimeout(function(){ clearInterval(embedPollTimer); }, 120000); // cobre consultas lentas
+}
+$('btn-portal-retry').addEventListener('click', function(){
+  if (ultimaChave) iniciarPortalEmbed(ultimaChave);
 });
 
 /* Desliga a câmera quando a página sai da visão (inclui redirecionamento) */
