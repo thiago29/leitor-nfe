@@ -321,7 +321,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v5.0</footer>
+<footer id="footer-v" class="footer-v">v5.1</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -874,6 +874,9 @@ function obterTokenCaptcha(){
 }
 /** Preenche o resumo local da chave sob o campo e prepara o card de dados. */
 function prepararChave(chave){
+  // devolve a chave ao campo: confirma a leitura E faz o botão amarelo
+  // funcionar de novo (sem isso ele validava o campo vazio -> "não tem 44 dígitos")
+  $('input-chave').value = formatarChave(chave);
   var dl = $('consulta-resumo');
   dl.hidden = false;
   while (dl.firstChild) dl.removeChild(dl.firstChild);
@@ -911,15 +914,21 @@ function consultarNfe(chave){
   var dl2 = $('dados-resumo');
   while (dl2.firstChild) dl2.removeChild(dl2.firstChild);
 
+  var ctrlFetch = ('AbortController' in window) ? new AbortController() : null;
+  var timerAbort = ctrlFetch ? setTimeout(function(){ ctrlFetch.abort(); }, 60000) : null;
   fetch(URL_API_RESUMO, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chave: chave, token: token })
-  }).then(function(r){ return r.json().then(function(j){ return { j: j }; }); })
+    body: JSON.stringify({ chave: chave, token: token }),
+    signal: ctrlFetch ? ctrlFetch.signal : undefined
+  }).then(function(r){
+    if (r.status >= 500) throw new Error('http-' + r.status);
+    return r.json().then(function(j){ return { j: j }; });
+  })
     .then(function(res){
       dadosSpin.hidden = true;
       var j = res.j || {};
-      if (j.ok) { renderizarDados(chave, j); toast('✅ Dados carregados!', 'ok'); return; }
+      if (j.ok) { renderizarDados(chave, j); toast('✅ Dados carregados!', 'ok'); resetarCaptcha(); return; }
       var msgs = {
         'captcha-invalido': 'O captcha não foi aceito. Marque de novo e tente consultar novamente.',
         'chave-invalida': (j.detalhe || 'Chave inválida.') + ' Dá para abrir direto no portal oficial, ali embaixo.',
@@ -936,7 +945,10 @@ function consultarNfe(chave){
     })
     .catch(function(err){
       dadosSpin.hidden = true;
-      dadosErro.textContent = 'Sem conexão com o servidor. Confira sua internet e tente de novo.';
+      if (timerAbort) clearTimeout(timerAbort);
+      dadosErro.textContent = (err && err.name === 'AbortError')
+        ? 'A consulta demorou mais do que o esperado. Tente de novo.'
+        : 'Sem conexão com o servidor. Confira sua internet e tente de novo.';
       dadosErro.hidden = false;
     });
 }
@@ -1067,10 +1079,8 @@ $('input-chave').addEventListener('keydown', function(ev){
 renderizarHistorico();
 iniciarCaptcha(); // widget hCaptcha na tela inicial (sitekey SEFAZ)
 
-// Se o app foi fechado (ou a aba da SEFAZ) com uma consulta aberta,
-// reabre a tela de consulta com a última chave válida guardada.
-var ultimaGuardada = lerUltima();
-if (ultimaGuardada) abrirConsulta(ultimaGuardada);
+// v5.1: NÃO restaura consulta ao abrir (o resumo de outra nota na tela inicial
+// confundia). Para reabrir uma consulta antiga: use o Histórico.
 
 /* Gancho público (E2E/testes e atalho para digitação rápida):
    __LNFE.mostrarResultado('44dígitos') — valida e abre a consulta embutida. */
