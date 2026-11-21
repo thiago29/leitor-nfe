@@ -321,7 +321,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v5.1</footer>
+<footer id="footer-v" class="footer-v">v5.2</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -915,7 +915,7 @@ function consultarNfe(chave){
   while (dl2.firstChild) dl2.removeChild(dl2.firstChild);
 
   var ctrlFetch = ('AbortController' in window) ? new AbortController() : null;
-  var timerAbort = ctrlFetch ? setTimeout(function(){ ctrlFetch.abort(); }, 60000) : null;
+  var timerAbort = ctrlFetch ? setTimeout(function(){ ctrlFetch.abort(); }, 120000) : null; // v5.2: acima do teto de 85s + backoffs (~95s) do crawler
   fetch(URL_API_RESUMO, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -933,6 +933,7 @@ function consultarNfe(chave){
         'captcha-invalido': 'O captcha não foi aceito. Marque de novo e tente consultar novamente.',
         'chave-invalida': (j.detalhe || 'Chave inválida.') + ' Dá para abrir direto no portal oficial, ali embaixo.',
         'portal-indisponivel': 'O portal da SEFAZ não respondeu agora. Tente de novo em instantes.',
+        'sefaz-lenta': (j.detalhe || 'A SEFAZ está demorando demais agora. Aguarde uns instantes e tente de novo.') + ' (ela oscila bastante nesse horário)',
         'falha-interna': 'Falha na consulta. Tente novamente — ou abra no portal oficial, ali embaixo.'
       };
       dadosErro.textContent = msgs[j.erro] || (j.detalhe || 'Não consegui consultar agora. Tente de novo.');
@@ -947,8 +948,10 @@ function consultarNfe(chave){
       dadosSpin.hidden = true;
       if (timerAbort) clearTimeout(timerAbort);
       dadosErro.textContent = (err && err.name === 'AbortError')
-        ? 'A consulta demorou mais do que o esperado. Tente de novo.'
-        : 'Sem conexão com o servidor. Confira sua internet e tente de novo.';
+        ? 'A consulta demorou mais de 1 minuto (a SEFAZ está lenta agora). Aguarde um pouco e tente de novo.'
+        : (String(err && err.message || '').indexOf('http-5') === 1
+            ? 'O servidor não conseguiu consultar a SEFAZ agora. Tente de novo em instantes.'
+            : 'Sem conexão com o servidor. Confira sua internet e tente de novo.');
       dadosErro.hidden = false;
     });
 }
