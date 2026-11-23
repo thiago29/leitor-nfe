@@ -321,7 +321,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v5.4</footer>
+<footer id="footer-v" class="footer-v">v5.6</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -955,38 +955,57 @@ function consultarNfe(chave){
       dadosErro.hidden = false;
     });
 }
-/** Renderiza a resposta do crawler como tabela limpa.
-    A estrutura final dos campos entra quando a 1ª resposta real chegar
-    (emitente / destinatário / produtos / valores). */
+/** Renderiza a resposta do crawler em seções estruturadas.
+    v5.6: estrutura real mapeada a partir da página "Estatísticas da NF-e":
+    dados da NF-e / emitente / destinatário / produtos / valores / eventos. */
 function renderizarDados(chave, j){
   var dl = $('dados-resumo');
   var d = j.dados || j.nfe || {};
   var html = '';
   function secao(titulo, pares){
-    var visiveis = pares.filter(function(p){ return p[1] !== undefined && p[1] !== null && String(p[1]).length > 0; });
+    var visiveis = (pares || []).filter(function(p){ return p[1] !== undefined && p[1] !== null && String(p[1]).length > 0; });
     if (!visiveis.length) return;
     html += '<p class="subtitulo-secao">' + escapeHtml(titulo) + '</p>';
     visiveis.forEach(function(par){
       html += '<div class="linha-resumo"><dt>' + escapeHtml(par[0]) + '</dt><dd>' + escapeHtml(String(par[1])) + '</dd></div>';
     });
   }
-  if (d.emitente) secao('Emitente', Object.entries(d.emitente));
-  if (d.destinatario) secao('Destinatário', Object.entries(d.destinatario));
+  // Cabeçalho: só campos relevantes (chaves do parser v5.6)
+  var rotulos = { naturezaOperacao:'Natureza da operação', tipoOperacao:'Tipo da operação',
+    serie:'Série', numero:'Número', dataEmissao:'Emissão', modelo:'Modelo' };
+  var cab = Object.keys(rotulos).map(function(k){ return [rotulos[k], d[k]]; }).filter(function(p){ return p[1]; });
+  if (cab.length) secao('Dados da NF-e', cab);
+  if (d.emitente) secao('Emitente', [
+    ['Razão social', d.emitente.razaoSocial], ['CNPJ', d.emitente.cnpj],
+    ['Inscrição estadual', d.emitente.ie], ['Município', d.emitente.municipio], ['UF', d.emitente.uf]
+  ].concat(Object.entries(d.emitente).filter(function(p){ return !['razaoSocial','cnpj','ie','municipio','uf'].includes(p[0]); })));
+  if (d.destinatario) secao('Destinatário', [
+    ['Razão social', d.destinatario.razaoSocial], ['CNPJ', d.destinatario.cnpj],
+    ['Inscrição estadual', d.destinatario.ie], ['Município', d.destinatario.municipio], ['UF', d.destinatario.uf],
+    ['País', d.destinatario.pais]
+  ].concat(Object.entries(d.destinatario).filter(function(p){ return !['razaoSocial','cnpj','ie','municipio','uf','pais'].includes(p[0]); })));
   if (d.produtos && d.produtos.length) {
     html += '<p class="subtitulo-secao">Produtos (' + d.produtos.length + ')</p>';
     d.produtos.forEach(function(p, i){
       var desc = p.descricao || p.produto || p.item || ('Item ' + (i + 1));
-      var extras = [ ['Qtd', p.quantidade], ['Un', p.unidade], ['Valor unit.', p.valorUnitario], ['Valor total', p.valorTotal] ]
+      var extras = [ ['Qtd', p.quantidade], ['Un', p.unidade], ['Valor unit.', p.valorUnitario], ['Valor total', p.valorTotal || p.valorProduto] ]
         .filter(function(kv){ return kv[1] !== undefined && kv[1] !== null && String(kv[1]).length > 0; })
         .map(function(kv){ return '<span style="display:inline-block;margin:0 14px 4px 0;">' + escapeHtml(kv[0]) + ': <b>' + escapeHtml(String(kv[1])) + '</b></span>'; })
         .join('');
       html += '<div class="linha-produto"><b>' + (i + 1) + '. ' + escapeHtml(desc) + '</b>' + extras + '</div>';
     });
+    if (d.valorTotal) secao('Valores', [['Valor total dos produtos', d.valorTotal]]);
+  }
+  if (d.eventos && d.eventos.length) {
+    d.eventos.forEach(function(ev){
+      secao('Eventos', [['Evento', ev.evento], ['Protocolo', ev.protocolo],
+        ['Autorização', ev.dataAutorizacao], ['Inclusão AN', ev.dataInclusaoAN]]);
+    });
   }
   var tt = d.total || d.valoresTotal;
-  if (tt) secao('Valores', Object.entries(tt));
-  if (!html && j._debug && Array.isArray(j._debug._cells)) {
-    // v5.4: fallback — mostra células brutas do <td> até o mapeamento definitivo
+  if (tt && !d.valorTotal) secao('Valores', Object.entries(tt));
+  if (!html && Array.isArray(j._debug._cells)) {
+    // fallback legacy — células brutas quando o parser estruturado não achou nada
     var brutas = j._debug._cells.filter(function(c){ return c && String(c).trim().length > 0; });
     if (brutas.length) {
       html += '<p class="subtitulo-secao">Detalhes (visão bruta)</p>';
