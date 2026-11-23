@@ -321,7 +321,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v5.2</footer>
+<footer id="footer-v" class="footer-v">v5.3</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -915,7 +915,7 @@ function consultarNfe(chave){
   while (dl2.firstChild) dl2.removeChild(dl2.firstChild);
 
   var ctrlFetch = ('AbortController' in window) ? new AbortController() : null;
-  var timerAbort = ctrlFetch ? setTimeout(function(){ ctrlFetch.abort(); }, 120000) : null; // v5.2: acima do teto de 85s + backoffs (~95s) do crawler
+  var timerAbort = ctrlFetch ? setTimeout(function(){ ctrlFetch.abort(); }, 120000) : null; // v5.3: acima do teto de 85s + backoffs (~95s) do crawler
   fetch(URL_API_RESUMO, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
