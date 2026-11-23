@@ -207,6 +207,25 @@
   .linha-produto{ padding:10px 12px; margin-top:10px; background:var(--fundo); border:1px solid var(--borda); border-radius:10px; font-size:.92rem; }
   .linha-produto b{ display:block; margin-bottom:4px; }
   .subtitulo-secao{ font-size:.85rem; font-weight:700; color:var(--suave); text-transform:uppercase; letter-spacing:.4px; margin:14px 0 2px; }
+  /* v6: rótulo da prévia instantânea (lida da própria chave, sem rede) */
+  #consulta-resumo::before{
+    content:'\1F4CB  Pr\00E9 via da chave \2014 lida do c\00F3 digo, sem internet';
+    display:block; margin:10px 0 6px; font-size:.82rem; font-weight:700;
+    color:var(--suave); text-transform:uppercase; letter-spacing:.3px;
+  }
+  /* v6: selo de status dentro do card de dados (aguardando / confirmado) */
+  .selo-status{ margin:8px 0 4px; padding:8px 10px; border-radius:8px; font-size:.9rem; font-weight:600; }
+  .selo-pendente{ background:#fff8e1; color:#7a5c00; }
+  .selo-ok{ background:var(--ok-bg); color:var(--ok-texto); }
+  .selo-warn{ background:var(--erro-bg); color:var(--erro-texto); }
+  @media (prefers-color-scheme:dark){ .selo-pendente{ background:#3a2f10; color:var(--amarelo); } }
+  /* v6: botão de fluxo contínuo (comboio: próximo caminhão) */
+  .btn-proxima{
+    background:#1e8e3e; color:#fff; border:none; width:100%;
+    font-size:1.15rem; font-weight:700; min-height:58px; margin-top:14px;
+    box-shadow:0 3px 0 rgba(0,0,0,.35);
+  }
+  .btn-proxima:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.35); background:#176f2f; }
 
   /* ===== Histórico ===== */
   #historico{ list-style:none; margin:0; padding:0; }
@@ -287,6 +306,7 @@
     <!-- v5: dados devolvidos pelo crawler -->
     <div class="card" id="card-dados" hidden>
       <h2>Dados da NF-e</h2>
+      <p id="dados-selo" class="selo-status" hidden></p>
       <div id="dados-spin" hidden>
         <div class="spinner" aria-hidden="true"></div>
         <p class="aviso">Consultando no Portal Nacional da NF-e…</p>
@@ -295,6 +315,9 @@
       <p id="dados-erro" class="erro-msg" role="alert" hidden></p>
       <a id="dados-link" class="link-apoio" target="_blank" rel="noopener" hidden>Abrir no portal oficial ↗</a>
     </div>
+
+    <!-- v6: fluxo contínuo — após a confirmação, limpa e volta direto ao scanner -->
+    <button id="btn-proxima" class="btn btn-proxima" type="button" hidden>➡️ Próxima leitura</button>
 
     <div class="card">
       <h2 style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
@@ -321,7 +344,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v5.6</footer>
+<footer id="footer-v" class="footer-v">v6.0</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -432,6 +455,8 @@ var captchaCard = $('card-captcha');
 var cardDados  = $('card-dados');
 var dadosSpin  = $('dados-spin');
 var dadosErro  = $('dados-erro');
+var dadosSelo  = $('dados-selo');
+var btnProxima = $('btn-proxima');
 var video      = $('video');
 var inputFoto  = $('input-foto');
 var canvas     = $('canvas');
@@ -891,7 +916,25 @@ function prepararChave(chave){
   cardDados.hidden = false;
   dadosErro.hidden = true;
   $('dados-link').hidden = true; // aparece só se o crawler falhar
+  dadosSelo.hidden = true;   // v6: reseta o selo da consulta anterior
+  btnProxima.hidden = true;  // v6: só reaparece depois de confirmado
   captchaCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+/** v6: selos de status — deixa claro o que é prévia e o que é confirmado pela SEFAZ. */
+function seloSelo(cls, texto){
+  dadosSelo.className = 'selo-status ' + cls;
+  dadosSelo.textContent = texto;
+  dadosSelo.hidden = false;
+}
+function confirmarSelo(){
+  var t = new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  seloSelo('selo-ok', '✅ Confirmado pela SEFAZ às ' + t);
+  btnProxima.hidden = false;
+  try { btnProxima.scrollIntoView({ behavior:'smooth', block:'center' }); } catch (e) {}
+}
+function falhouSelo(){
+  seloSelo('selo-warn', '⚠️ Ainda sem confirmação da SEFAZ');
+  btnProxima.hidden = true;
 }
 /** Fluxo principal: chave + token -> POST /api/resumo -> renderiza os dados. */
 function consultarNfe(chave){
@@ -911,6 +954,7 @@ function consultarNfe(chave){
   }
   dadosSpin.hidden = false;
   dadosErro.hidden = true;
+  seloSelo('selo-pendente', '⏳ Aguardando resposta da SEFAZ…');
   var dl2 = $('dados-resumo');
   while (dl2.firstChild) dl2.removeChild(dl2.firstChild);
 
@@ -928,7 +972,7 @@ function consultarNfe(chave){
     .then(function(res){
       dadosSpin.hidden = true;
       var j = res.j || {};
-      if (j.ok) { renderizarDados(chave, j); toast('✅ Dados carregados!', 'ok'); resetarCaptcha(); return; }
+      if (j.ok) { renderizarDados(chave, j); toast('✅ Dados carregados!', 'ok'); resetarCaptcha(); confirmarSelo(); return; }
       var msgs = {
         'captcha-invalido': 'O captcha não foi aceito. Marque de novo e tente consultar novamente.',
         'chave-invalida': (j.detalhe || 'Chave inválida.') + ' Dá para abrir direto no portal oficial, ali embaixo.',
@@ -942,6 +986,7 @@ function consultarNfe(chave){
       lk.href = URL_PORTAL + chave;
       lk.hidden = false;
       if (j.erro === 'captcha-invalido') resetarCaptcha(); // token rejeitado: gera novo
+      falhouSelo(); // v6
       vibrar([120]);
     })
     .catch(function(err){
@@ -953,6 +998,7 @@ function consultarNfe(chave){
             ? 'O servidor não conseguiu consultar a SEFAZ agora. Tente de novo em instantes.'
             : 'Sem conexão com o servidor. Confira sua internet e tente de novo.');
       dadosErro.hidden = false;
+      falhouSelo(); // v6
     });
 }
 /** Renderiza a resposta do crawler em seções estruturadas.
@@ -1105,6 +1151,20 @@ $('input-chave').addEventListener('keydown', function(ev){
   if (ev.key === 'Enter') { ev.preventDefault(); consultarManual(); }
 });
 
+/* v6: fluxo contínuo — limpa a consulta anterior e volta direto ao scanner */
+function proximaLeitura(){
+  $('input-chave').value = '';
+  $('manual-erro').hidden = true;
+  $('consulta-resumo').hidden = true;
+  cardDados.hidden = true;
+  dadosSelo.hidden = true;
+  btnProxima.hidden = true;
+  resetarCaptcha();
+  vibrar([60]);
+  abrirLeitura();
+}
+$('btn-proxima').addEventListener('click', proximaLeitura);
+
 /* ================= Inicialização ================= */
 renderizarHistorico();
 iniciarCaptcha(); // widget hCaptcha na tela inicial (sitekey SEFAZ)
@@ -1114,7 +1174,7 @@ iniciarCaptcha(); // widget hCaptcha na tela inicial (sitekey SEFAZ)
 
 /* Gancho público (E2E/testes e atalho para digitação rápida):
    __LNFE.mostrarResultado('44dígitos') — valida e abre a consulta embutida. */
-window.__LNFE = { mostrarResultado: mostrarResultado, abrirConsulta: abrirConsulta, salvarUltima: salvarUltima, lerUltima: lerUltima, consultarNfe: consultarNfe, prepararChave: prepararChave, iniciarCaptcha: iniciarCaptcha, getToken: obterTokenCaptcha, _token: null };
+window.__LNFE = { mostrarResultado: mostrarResultado, abrirConsulta: abrirConsulta, salvarUltima: salvarUltima, lerUltima: lerUltima, consultarNfe: consultarNfe, prepararChave: prepararChave, iniciarCaptcha: iniciarCaptcha, getToken: obterTokenCaptcha, proximaLeitura: proximaLeitura, _token: null };
 })();
 </script>
 </body>
