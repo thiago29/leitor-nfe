@@ -995,7 +995,7 @@ function consultarNfe(chave){
       if (timerAbort) clearTimeout(timerAbort);
       dadosErro.textContent = (err && err.name === 'AbortError')
         ? 'A consulta demorou mais de 1 minuto (a SEFAZ está lenta agora). Aguarde um pouco e tente de novo.'
-        : (String(err && err.message || '').indexOf('http-5') === 1
+        : (String(err && err.message || '').indexOf('http-5') === 0
             ? 'O servidor não conseguiu consultar a SEFAZ agora. Tente de novo em instantes.'
             : 'Sem conexão com o servidor. Confira sua internet e tente de novo.');
       dadosErro.hidden = false;
