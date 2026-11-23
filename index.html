@@ -321,7 +321,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v5.3</footer>
+<footer id="footer-v" class="footer-v">v5.4</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -985,10 +985,18 @@ function renderizarDados(chave, j){
   }
   var tt = d.total || d.valoresTotal;
   if (tt) secao('Valores', Object.entries(tt));
+  if (!html && j._debug && Array.isArray(j._debug._cells)) {
+    // v5.4: fallback — mostra células brutas do <td> até o mapeamento definitivo
+    var brutas = j._debug._cells.filter(function(c){ return c && String(c).trim().length > 0; });
+    if (brutas.length) {
+      html += '<p class="subtitulo-secao">Detalhes (visão bruta)</p>';
+      html += brutas.map(function(c){ return '<div class="linha-resumo"><dd>' + escapeHtml(String(c)) + '</dd></div>'; }).join('');
+    }
+  }
   if (html) {
     dl.innerHTML = html;
   } else {
-    dl.innerHTML = '<p class="vazio">Consulta processada, mas o portal devolveu dados ainda não mapeados nesta versão.</p>';
+    dl.innerHTML = '<p class="vazio">Consulta processada, mas o portal não devolveu detalhes visíveis nesta resposta.</p>';
   }
   window.dispatchEvent(new Event('lnfe:dados')); // gancho p/ E2E
 }
