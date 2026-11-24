@@ -203,7 +203,6 @@
   #card-captcha h2{ font-size:.98rem; color:var(--suave); font-weight:600; }
   #btn-consultar{ margin-top:16px; }
   #dados-spin{ text-align:center; padding:12px 0 8px; }
-  .link-apoio{ display:inline-block; margin-top:12px; font-size:.9rem; color:var(--primaria); text-decoration:none; }
   .linha-produto{ padding:10px 12px; margin-top:10px; background:var(--fundo); border:1px solid var(--borda); border-radius:10px; font-size:.92rem; }
   .linha-produto b{ display:block; margin-bottom:4px; }
   .subtitulo-secao{ font-size:.85rem; font-weight:700; color:var(--suave); text-transform:uppercase; letter-spacing:.4px; margin:14px 0 2px; }
@@ -314,7 +313,6 @@
       </div>
       <dl id="dados-resumo" class="consulta-resumo"></dl>
       <p id="dados-erro" class="erro-msg" role="alert" hidden></p>
-      <a id="dados-link" class="link-apoio" target="_blank" rel="noopener" hidden>Abrir no portal oficial ↗</a>
     </div>
 
     <!-- v6: fluxo contínuo — após a confirmação, limpa e volta direto ao scanner -->
@@ -345,7 +343,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v6.0</footer>
+<footer id="footer-v" class="footer-v">v6.1</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -362,7 +360,6 @@
    A URL do portal segue servindo só como link de apoio (aba separada). */
 var SITEKEY_HCAPTCHA = 'e72d2f82-9594-4448-a875-47ded9a1898a';
 var URL_API_RESUMO = '/api/resumo';
-var URL_PORTAL = 'https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g=&nfe=';
 var TAMANHO_CHAVE = 44;
 var HIST_MAX = 20;
 var HIST_CHAVE = 'leitor-nfe:historico';
@@ -916,7 +913,6 @@ function prepararChave(chave){
   });
   cardDados.hidden = false;
   dadosErro.hidden = true;
-  $('dados-link').hidden = true; // aparece só se o crawler falhar
   dadosSelo.hidden = true;   // v6: reseta o selo da consulta anterior
   btnProxima.hidden = true;  // v6: só reaparece depois de confirmado
   captchaCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -976,16 +972,13 @@ function consultarNfe(chave){
       if (j.ok) { renderizarDados(chave, j); toast('✅ Dados carregados!', 'ok'); resetarCaptcha(); confirmarSelo(); return; }
       var msgs = {
         'captcha-invalido': 'O captcha não foi aceito. Marque de novo e tente consultar novamente.',
-        'chave-invalida': (j.detalhe || 'Chave inválida.') + ' Dá para abrir direto no portal oficial, ali embaixo.',
+        'chave-invalida': j.detalhe || 'Chave inválida.',
         'portal-indisponivel': 'O portal da SEFAZ não respondeu agora. Tente de novo em instantes.',
         'sefaz-lenta': (j.detalhe || 'A SEFAZ está demorando demais agora. Aguarde uns instantes e tente de novo.') + ' (ela oscila bastante nesse horário)',
-        'falha-interna': 'Falha na consulta. Tente novamente — ou abra no portal oficial, ali embaixo.'
+        'falha-interna': 'Falha na consulta. Tente novamente.'
       };
       dadosErro.textContent = msgs[j.erro] || (j.detalhe || 'Não consegui consultar agora. Tente de novo.');
       dadosErro.hidden = false;
-      var lk = $('dados-link');
-      lk.href = URL_PORTAL + chave;
-      lk.hidden = false;
       if (j.erro === 'captcha-invalido') resetarCaptcha(); // token rejeitado: gera novo
       falhouSelo(); // v6
       vibrar([120]);
