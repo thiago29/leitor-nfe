@@ -371,7 +371,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v6.2</footer>
+<footer id="footer-v" class="footer-v">v6.3 · 👥 <span id="stat-online">–</span> acessando agora · 🧾 <span id="stat-notas">0</span> notas lidas</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -1237,12 +1237,51 @@ if (btnTema) {
 renderizarHistorico();
 iniciarCaptcha(); // widget hCaptcha na tela inicial (sitekey SEFAZ)
 
+/* v6.3: rodapé ao vivo — pessoas acessando agora + total de notas lidas.
+   Presença: cada aparelho tem um id anônimo (localStorage); o app manda um
+   heartbeat a cada ~30s para /api/ping e o servidor conta quem pingou nos
+   últimos 90s (aba fechada ou muito em segundo plano sai da contagem).
+   Sem login, sem cookie, só o id anônimo do aparelho. */
+var statOnline = $('stat-online'), statNotas = $('stat-notas');
+function idAparelho(){
+  try {
+    var id = localStorage.getItem('leitor-nfe:disp');
+    if (!id) {
+      id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      localStorage.setItem('leitor-nfe:disp', id);
+    }
+    return id;
+  } catch (e) { return 'd' + Math.random().toString(36).slice(2, 10); } // sem localStorage: id efêmero
+}
+function atualizarRodape(dados){
+  if (!dados) return;
+  if (dados.online != null && statOnline) statOnline.textContent = String(dados.online);
+  if (dados.notasLidasTotal != null && statNotas) statNotas.textContent = String(dados.notasLidasTotal);
+}
+var _ultimoPing = 0;
+function pingPresenca(){
+  var agora = Date.now();
+  // visível: a cada ~30s; em segundo plano: a cada ~90s (o navegador já
+  // limita timers de aba oculta a ~1/min; o servidor expira pings >90s)
+  var minimo = (document.visibilityState === 'visible') ? 30000 : 90000;
+  if (agora - _ultimoPing < minimo - 5000) return;
+  _ultimoPing = agora;
+  try {
+    fetch('/api/ping', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: idAparelho() }) })
+      .then(function(r){ return r.json(); })
+      .then(atualizarRodape)
+      .catch(function(){});
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', function(){ if (!document.hidden) pingPresenca(); });
 // v5.1: NÃO restaura consulta ao abrir (o resumo de outra nota na tela inicial
 // confundia). Para reabrir uma consulta antiga: use o Histórico.
+pingPresenca();        // v6.3: primeira presença + números
+setInterval(pingPresenca, 15000); // ritmo controlado por _ultimoPing (30s/90s)
 
 /* Gancho público (E2E/testes e atalho para digitação rápida):
    __LNFE.mostrarResultado('44dígitos') — valida e abre a consulta embutida. */
-window.__LNFE = { mostrarResultado: mostrarResultado, abrirConsulta: abrirConsulta, salvarUltima: salvarUltima, lerUltima: lerUltima, consultarNfe: consultarNfe, prepararChave: prepararChave, iniciarCaptcha: iniciarCaptcha, getToken: obterTokenCaptcha, proximaLeitura: proximaLeitura, _token: null };
+window.__LNFE = { mostrarResultado: mostrarResultado, abrirConsulta: abrirConsulta, salvarUltima: salvarUltima, lerUltima: lerUltima, consultarNfe: consultarNfe, prepararChave: prepararChave, iniciarCaptcha: iniciarCaptcha, getToken: obterTokenCaptcha, proximaLeitura: proximaLeitura, pingPresenca: pingPresenca, atualizarRodape: atualizarRodape, _token: null };
 })();
 </script>
 </body>
