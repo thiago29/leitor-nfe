@@ -6,7 +6,17 @@
 <title>Leitor NF-e — Consulta por código de barras</title>
 <meta name="description" content="Lê o código de barras (chave de 44 dígitos) do DANFE e abre a consulta no Portal Nacional da NF-e.">
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0b3d91">
+<meta id="meta-tema" name="theme-color" content="#0b3d91">
+<script>
+/* v6.2: aplica o tema ANTES da primeira pintura (evita flash de tema errado).
+   Ordem de decisão: escolha manual salva no aparelho > preferência do sistema. */
+(function(){
+  var t = null;
+  try { t = localStorage.getItem('leitor-nfe:tema'); } catch (e) {}
+  var escuro = t ? t === 'dark' : !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.setAttribute('data-theme', escuro ? 'dark' : 'light');
+})();
+</script>
 <!-- PWA / tela de início no iPhone -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -34,21 +44,26 @@
     --erro-texto:#b3261e;
     --ok-bg:#e6f4ea;
     --ok-texto:#1b7a2d;
+    --selo-pend-bg:#fff8e1;
+    --selo-pend-texto:#7a5c00;
   }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --fundo:#0f1115;
-      --cartao:#1a1d24;
-      --texto:#f3f4f6;
-      --suave:#9ca3af;
-      --borda:#343a46;
-      --primaria:#2f6bd8;
-      --primaria-hover:#3d79e6;
-      --erro-bg:#3b1512;
-      --erro-texto:#ff8a80;
-      --ok-bg:#12301a;
-      --ok-texto:#7ed695;
-    }
+  /* v6.2: tema via data-theme (auto por sistema + toggle manual).
+     O script do <head> aplica o tema ANTES da primeira pintura (sem flash). */
+  html[data-theme="dark"]{
+    --azul:#10203f;
+    --fundo:#0f1115;
+    --cartao:#1a1d24;
+    --texto:#f3f4f6;
+    --suave:#9ca3af;
+    --borda:#343a46;
+    --primaria:#2f6bd8;
+    --primaria-hover:#3d79e6;
+    --erro-bg:#3b1512;
+    --erro-texto:#ff8a80;
+    --ok-bg:#12301a;
+    --ok-texto:#7ed695;
+    --selo-pend-bg:#3a2f10;
+    --selo-pend-texto:#ffd23f;
   }
   *{ box-sizing:border-box; }
   html, body{ margin:0; padding:0; }
@@ -67,6 +82,15 @@
   }
   header h1{ margin:0; font-size:1.35rem; letter-spacing:.2px; }
   header p{ margin:2px 0 0; font-size:.85rem; opacity:.85; }
+  /* v6.2: toggle de tema no cabeçalho */
+  .header-linha{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .btn-tema{
+    flex:0 0 auto; width:44px; height:44px; border-radius:12px; cursor:pointer;
+    background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.35); color:#fff;
+    font-size:1.15rem; line-height:1; display:inline-flex; align-items:center; justify-content:center;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .btn-tema:active{ transform:scale(.96); }
   main{ max-width:600px; margin:0 auto; padding:16px 16px calc(24px + env(safe-area-inset-bottom)); }
 
   .btn{
@@ -214,10 +238,9 @@
   }
   /* v6: selo de status dentro do card de dados (aguardando / confirmado) */
   .selo-status{ margin:8px 0 4px; padding:8px 10px; border-radius:8px; font-size:.9rem; font-weight:600; }
-  .selo-pendente{ background:#fff8e1; color:#7a5c00; }
+  .selo-pendente{ background:var(--selo-pend-bg); color:var(--selo-pend-texto); }
   .selo-ok{ background:var(--ok-bg); color:var(--ok-texto); }
   .selo-warn{ background:var(--erro-bg); color:var(--erro-texto); }
-  @media (prefers-color-scheme:dark){ .selo-pendente{ background:#3a2f10; color:var(--amarelo); } }
   /* v6: botão de fluxo contínuo (comboio: próximo caminhão) */
   .btn-proxima{
     background:#1e8e3e; color:#fff; border:none; width:100%;
@@ -270,8 +293,13 @@
 <div id="banner-http" hidden>A câmera só funciona em <b>HTTPS</b> (ou localhost). Publique o site ou sirva-o localmente para ler o código de barras.</div>
 
 <header>
-  <h1>💀 Leitor NF-e</h1>
-  <p>Ler o DANFE e consultar no Portal Nacional da NF-e</p>
+  <div class="header-linha">
+    <div>
+      <h1>💀 Leitor NF-e</h1>
+      <p>Ler o DANFE e consultar no Portal Nacional da NF-e</p>
+    </div>
+    <button id="btn-tema" class="btn-tema" type="button">🌙</button>
+  </div>
 </header>
 
 <main>
@@ -343,7 +371,7 @@
     </div>
   </section>
 
-<footer id="footer-v" class="footer-v">v6.1</footer>
+<footer id="footer-v" class="footer-v">v6.2</footer>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <canvas id="canvas" hidden aria-hidden="true"></canvas>
@@ -885,11 +913,17 @@ function iniciarCaptcha(){
   if (captchaInstancia) return;
   captchaInstancia = window.hcaptcha.render(captchaSlot, {
     sitekey: SITEKEY_HCAPTCHA,
+    theme: (document.documentElement.getAttribute('data-theme') === 'dark') ? 'dark' : 'light', // v6.2
     callback: function(token){ window.__LNFE._token = token; }
   });
 }
 function resetarCaptcha(){
   try { if (captchaInstancia && window.hcaptcha) window.hcaptcha.reset(captchaInstancia); } catch (e) {}
+}
+function recriarCaptcha(){ // v6.2: re-renderiza o widget no tema atual (não há troca de tema em runtime)
+  try { if (window.hcaptcha && captchaInstancia) window.hcaptcha.remove(captchaInstancia); } catch (e) {}
+  captchaInstancia = null;
+  iniciarCaptcha();
 }
 function obterTokenCaptcha(){
   try { return (window.hcaptcha && captchaInstancia) ? window.hcaptcha.getResponse(captchaInstancia) : null; }
@@ -1158,6 +1192,46 @@ function proximaLeitura(){
   abrirLeitura();
 }
 $('btn-proxima').addEventListener('click', proximaLeitura);
+
+/* v6.2: tema claro/escuro — auto (segue o sistema) + toggle manual com persistência.
+   O script do <head> já definiu o tema inicial; aqui só sincronizamos botão,
+   meta theme-color, captcha e a escuta de mudanças do sistema (modo auto). */
+var btnTema = $('btn-tema');
+function aplicarTemaUI(tema){
+  var m = $('meta-tema');
+  if (m) m.setAttribute('content', tema === 'dark' ? '#10203f' : '#0b3d91');
+  if (btnTema) {
+    btnTema.textContent = tema === 'dark' ? '☀️' : '🌙';
+    btnTema.setAttribute('aria-label', tema === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro');
+  }
+  try { if (window.hcaptcha && captchaInstancia) recriarCaptcha(); } catch (e) {}
+}
+if (btnTema) {
+  var temaAtual = document.documentElement.getAttribute('data-theme') || 'light';
+  aplicarTemaUI(temaAtual);
+  btnTema.addEventListener('click', function(){
+    var nova = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', nova);
+    try { localStorage.setItem('leitor-nfe:tema', nova); } catch (e) {}
+    aplicarTemaUI(nova);
+    vibrar([40]);
+  });
+  try {
+    if (window.matchMedia) {
+      var mqTema = matchMedia('(prefers-color-scheme: dark)');
+      var escTema = function(ev){
+        var manual = null;
+        try { manual = localStorage.getItem('leitor-nfe:tema'); } catch (e) {}
+        if (!manual) {
+          document.documentElement.setAttribute('data-theme', ev.matches ? 'dark' : 'light');
+          aplicarTemaUI(ev.matches ? 'dark' : 'light');
+        }
+      };
+      if (mqTema.addEventListener) mqTema.addEventListener('change', escTema);
+      else if (mqTema.addListener) mqTema.addListener(escTema);
+    }
+  } catch (e) {}
+}
 
 /* ================= Inicialização ================= */
 renderizarHistorico();
